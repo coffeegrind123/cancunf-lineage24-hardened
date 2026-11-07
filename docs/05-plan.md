@@ -94,6 +94,7 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 5. **Calls and SMS end to end** once a SIM is available.
 6. **On-device coding agent with system access.** Details in the section below.
 7. **Preloaded apps:** Titanium Browser and Ovis. Details in the section below.
+8. **OTA updates from GitHub**, with the GrapheneOS Updater (LineageOS Updater as fallback) and a periodic re-port and release procedure. See [07-maintenance.md](07-maintenance.md).
 
 ## Phase 6: pi with free access to the system
 

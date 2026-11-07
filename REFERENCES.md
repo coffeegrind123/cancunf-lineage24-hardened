@@ -118,3 +118,10 @@ Every external source used so far, grouped by topic.
   - [Shizuku](https://github.com/RikkaApps/Shizuku)
   - [Termux](https://github.com/termux/termux-app)
   - [Termux:API](https://github.com/termux/termux-api)
+
+## Updates and OTA (phase 8)
+
+- [GrapheneOS Updater](https://github.com/GrapheneOS/platform_packages_apps_Updater): the automatic background updater. Server URL is in `res/values/config.xml`.
+- [GrapheneOS script](https://github.com/GrapheneOS/script): `generate-metadata` for the Updater's server files.
+- [GrapheneOS releases.grapheneos.org](https://github.com/GrapheneOS/releases.grapheneos.org): their update server.
+- [LineageOS Updater](https://github.com/LineageOS/android_packages_apps_Updater): the JSON format (`NetworkUpdate.kt`) and the `lineage.updater.uri` property.

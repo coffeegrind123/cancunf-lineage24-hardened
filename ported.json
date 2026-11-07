@@ -1,0 +1,20 @@
+{
+  "_comment": "Last GrapheneOS commit ported per repo (branch 17). Updated at each release; see docs/07-maintenance.md step 4. null = not ported yet.",
+  "aosp_base": "android-17.0.0_r1",
+  "graphene_branch": "17",
+  "repos": {
+    "platform_frameworks_base": null,
+    "platform_libcore": null,
+    "platform_art": null,
+    "platform_bionic": null,
+    "platform_build": null,
+    "platform_frameworks_opt_telephony": null,
+    "platform_packages_modules_Permission": null,
+    "platform_frameworks_native": null,
+    "platform_packages_apps_Settings": null,
+    "platform_system_sepolicy": null,
+    "platform_packages_apps_GmsCompat": null,
+    "platform_packages_apps_Updater": null
+  },
+  "releases": []
+}
