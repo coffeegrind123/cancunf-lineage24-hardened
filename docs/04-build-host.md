@@ -39,3 +39,13 @@ docker volume create --driver local --opt type=ext4 --opt device=/dev/sdX --opt 
 - When the build ends, it logs the cgroup's `memory.peak`, `memory.swap.peak` and OOM events, so the cap can be tuned from measurements.
 
 [`build/sync.sh`](../build/sync.sh) runs `repo init` for `lineage-24.0` (`--depth=1 --git-lfs`), copies [`build/local_manifests/cancunf.xml`](../build/local_manifests/cancunf.xml) in, and syncs with 4 jobs. It runs at idle I/O priority so it doesn't swamp the HDD.
+
+## Our changes to synced trees
+
+Our changes live as `git format-patch` files in [`patches/<project>/`](../patches). [`build/apply-patches.sh`](../build/apply-patches.sh) re-applies them on a local `lineage` branch on top of the synced revision, so a later `repo sync` can move the base. Run it after every sync and before building.
+
+The first patch replaces YAAP's product with `lineage_cancunf`.
+
+Checked before writing it:
+- **No kernel is compiled.** `TARGET_NO_KERNEL_OVERRIDE := true` makes LineageOS skip its whole `kernel.mk` logic, and the tree's own rule copies the prebuilt `Image.gz`.
+- **The IMS app is already patched.** The vendor `ImsService.apk` has zero `TelephonyMetrics` references and declares `mediatek-ims-base`/`mediatek-ims-oem-plugin`, which is YAAP's patch 0006.

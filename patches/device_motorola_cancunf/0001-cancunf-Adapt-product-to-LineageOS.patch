@@ -1,0 +1,85 @@
+From cc64617c75fa673bc5dc7cc7279f812efd7df013 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sat, 7 Nov 2026 15:56:34 +0000
+Subject: [PATCH] cancunf: Adapt product to LineageOS
+
+Replace the YAAP product with lineage_cancunf, inheriting
+vendor/lineage common_full_phone. LineageOS sizes the boot
+animation from TARGET_SCREEN_{HEIGHT,WIDTH} rather than
+TARGET_BOOT_ANIMATION_RES. Dependencies come from the local
+manifest, so yaap.dependencies is dropped.
+---
+ AndroidProducts.mk                    |  2 +-
+ yaap_cancunf.mk => lineage_cancunf.mk | 11 +++++++----
+ yaap.dependencies                     | 22 ----------------------
+ 3 files changed, 8 insertions(+), 27 deletions(-)
+ rename yaap_cancunf.mk => lineage_cancunf.mk (70%)
+ delete mode 100644 yaap.dependencies
+
+diff --git a/AndroidProducts.mk b/AndroidProducts.mk
+index a77e878..07e4afd 100644
+--- a/AndroidProducts.mk
++++ b/AndroidProducts.mk
+@@ -5,4 +5,4 @@
+ #
+ 
+ PRODUCT_MAKEFILES := \
+-    $(LOCAL_DIR)/yaap_cancunf.mk
++    $(LOCAL_DIR)/lineage_cancunf.mk
+diff --git a/yaap_cancunf.mk b/lineage_cancunf.mk
+similarity index 70%
+rename from yaap_cancunf.mk
+rename to lineage_cancunf.mk
+index c0acf00..d248ffd 100644
+--- a/yaap_cancunf.mk
++++ b/lineage_cancunf.mk
+@@ -12,11 +12,14 @@ TARGET_SUPPORTS_OMX_SERVICE := false
+ # Inherit from device makefile.
+ $(call inherit-product, device/motorola/cancunf/device.mk)
+ 
+-# Inherit some common YAAP stuff.
+-$(call inherit-product, vendor/yaap/config/common_full_phone.mk)
+-TARGET_BOOT_ANIMATION_RES := 1080
++# Inherit some common LineageOS stuff.
++$(call inherit-product, vendor/lineage/config/common_full_phone.mk)
+ 
+-PRODUCT_NAME := yaap_cancunf
++# Boot animation (LineageOS sizes it from the panel resolution)
++TARGET_SCREEN_HEIGHT := 2400
++TARGET_SCREEN_WIDTH := 1080
++
++PRODUCT_NAME := lineage_cancunf
+ PRODUCT_DEVICE := cancunf
+ PRODUCT_MANUFACTURER := motorola
+ PRODUCT_BRAND := motorola
+diff --git a/yaap.dependencies b/yaap.dependencies
+deleted file mode 100644
+index d6b8005..0000000
+--- a/yaap.dependencies
++++ /dev/null
+@@ -1,22 +0,0 @@
+-[
+-  {
+-    "repository"  : "vendor_motorola_cancunf",
+-    "target_path" : "vendor/motorola/cancunf"
+-  },
+-  {
+-    "repository"  : "hardware_mediatek",
+-    "target_path" : "hardware/mediatek"
+-  },
+-  {
+-    "repository"  : "device_motorola_cancunf-kernel",
+-    "target_path" : "device/motorola/cancunf-kernel"
+-  },
+-  {
+-    "repository": "vendor_motorola_cancunf-motcamera",
+-    "target_path": "vendor/motorola/cancunf-motcamera"
+-  },
+-  {
+-    "repository": "packages_apps_DisplayFeatures",
+-    "target_path": "packages/apps/DisplayFeatures"
+-  }
+-]
+-- 
+2.43.0
+

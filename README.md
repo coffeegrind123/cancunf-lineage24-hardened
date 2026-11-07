@@ -7,8 +7,8 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Full stock backup, both slots, all partitions except userdata | done, hash-verified, factory `boot_a` proven against signed vbmeta |
 | Restore tooling (fastboot set + root-only per-device partitions) | done; `boot_a` restore used for real |
 | Bootloader unlock + temporary root (Magisk v27.0) | done; v28+ is refused by this bootloader, see [docs/03-root.md](docs/03-root.md) |
-| Build host on Windows/WSL2 with a hard memory cap | prepared; LineageOS 24 source syncing |
-| Plain LineageOS 24 for cancunf | planned (phase 1) |
+| Build host on Windows/WSL2 with a hard memory cap | done |
+| Plain LineageOS 24 for cancunf | prepared: source synced (136 GB), `lineage_cancunf` product written, IMS app verified patched; build awaiting go-ahead |
 | GrapheneOS GmsCompat (sandboxed Google Play) | planned (phase 2) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
 | Root-free Play Integrity support | planned (phase 4) |
@@ -23,6 +23,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 3. [Unlock and root](docs/03-root.md): the unlock, why v28+ Magisk images fail with `Preflash validation failed`, and the v27.0 route.
 4. [Build host](docs/04-build-host.md): an ext4 VHDX on a spare drive, a Docker volume on the raw device, and a cgroup-capped build container.
 5. [Plan](docs/05-plan.md): why a device build rather than a GSI, the GrapheneOS port survey, and the banking limits.
+6. [GmsCompat port](docs/06-gmscompat-port.md): commit order and prerequisites for porting GrapheneOS's sandboxed Google Play.
 
 ## Layout
 
@@ -32,6 +33,7 @@ scripts/restore/restore-fastboot.ps1 Windows: verified fastboot restore of the f
 scripts/restore/device-restore.sh    on-phone (root): restore nvdata/persist/... with readback verification
 scripts/windows/*.ps1                fastboot GUID fix, build-disk creation and re-attach
 build/                               Dockerfile, local manifest, sync, survey and capped build scripts
+patches/<project>/                   our commits on top of the synced trees (build/apply-patches.sh)
 ```
 
 Nothing device-unique is in this repository: no images, serials, IMEIs or unlock data. Your own dump is yours to keep private, because it contains your IMEI, calibration data and device keys.
