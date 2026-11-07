@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- cancunf device sources, from YAAP's Android 17 ("seventeen") trees. -->
+<manifest>
+  <remote name="yaap" fetch="https://github.com/yaap" />
+
+  <project path="device/motorola/cancunf"           name="device_motorola_cancunf"           remote="yaap" revision="seventeen" />
+  <project path="device/motorola/cancunf-kernel"    name="device_motorola_cancunf-kernel"    remote="yaap" revision="seventeen" />
+  <project path="vendor/motorola/cancunf"           name="vendor_motorola_cancunf"           remote="yaap" revision="seventeen" />
+  <project path="vendor/motorola/cancunf-motcamera" name="vendor_motorola_cancunf-motcamera" remote="yaap" revision="seventeen" />
+  <project path="hardware/mediatek"                 name="hardware_mediatek"                 remote="yaap" revision="seventeen" />
+  <project path="device/mediatek/sepolicy_vndr"     name="device_mediatek_sepolicy_vndr"     remote="yaap" revision="seventeen" />
+  <project path="packages/apps/DisplayFeatures"     name="packages_apps_DisplayFeatures"     remote="yaap" revision="seventeen" />
+</manifest>
