@@ -1,0 +1,12 @@
+# Never commit device data: partition images carry IMEI, calibration and keys.
+*.img
+*.bin
+*.zip
+*.apk
+*.vhdx
+*.log
+dump/
+stock/
+firmware/
+identity/
+SHA256SUMS
