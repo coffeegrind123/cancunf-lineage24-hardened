@@ -125,3 +125,13 @@ Every external source used so far, grouped by topic.
 - [GrapheneOS script](https://github.com/GrapheneOS/script): `generate-metadata` for the Updater's server files.
 - [GrapheneOS releases.grapheneos.org](https://github.com/GrapheneOS/releases.grapheneos.org): their update server.
 - [LineageOS Updater](https://github.com/LineageOS/android_packages_apps_Updater): the JSON format (`NetworkUpdate.kt`) and the `lineage.updater.uri` property.
+
+## Kernel (phase 9)
+
+- [coffeegrind123/kernel_motorola_cancunf](https://github.com/coffeegrind123/kernel_motorola_cancunf): our fork.
+- [cyberknight777/dragonheart_kernel_motorola_cancunf](https://github.com/cyberknight777/dragonheart_kernel_motorola_cancunf): the base, with MediaTek drivers and `build.config.cancunf`.
+- [yaap/device_motorola_cancunf-kernel](https://github.com/yaap/device_motorola_cancunf-kernel/tree/seventeen): the current prebuilts.
+- [AOSP kernel/common `android12-5.10`](https://android.googlesource.com/kernel/common/+log/refs/heads/android12-5.10): Google's 5.10 kernel branch.
+- [kernel.org releases](https://www.kernel.org/category/releases.html): stable series and their end-of-life dates.
+- [GrapheneOS/kernel_common-6.1](https://github.com/GrapheneOS/kernel_common-6.1): GrapheneOS's kernel hardening (93 commits on `android14-6.1-lts`).
+- [LineageOS kernel.mk](https://github.com/LineageOS/android_vendor_lineage/blob/lineage-24.0/build/tasks/kernel.mk): building the kernel in-tree.

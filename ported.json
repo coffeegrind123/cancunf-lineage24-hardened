@@ -16,5 +16,12 @@
     "platform_packages_apps_GmsCompat": null,
     "platform_packages_apps_Updater": null
   },
-  "releases": []
+  "releases": [],
+  "kernel": {
+    "_comment": "see docs/08-kernel.md",
+    "base": "cyberknight777/dragonheart_kernel_motorola_cancunf@android12-5.10 (5.10.240)",
+    "google_android12_5_10": null,
+    "graphene_kernel_common_6_1": null,
+    "graphene_kernel_common_6_1_surveyed_head": "e4c76d08d7"
+  }
 }

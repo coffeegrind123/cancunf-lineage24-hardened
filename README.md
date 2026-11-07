@@ -16,6 +16,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | pi coding agent with system access (privileged bridge, Computer Control) | planned (phase 6) |
 | Preloaded Titanium Browser and Ovis | planned (phase 7) |
 | OTA updates from GitHub releases (GrapheneOS Updater), periodic re-port | planned (phase 8), runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
+| Own kernel ([fork](https://github.com/coffeegrind123/kernel_motorola_cancunf)): Google `android12-5.10` fixes plus GrapheneOS hardening | planned (phase 9), [docs/08-kernel.md](docs/08-kernel.md) |
 
 ## Docs
 
@@ -26,6 +27,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 5. [Plan](docs/05-plan.md): why a device build rather than a GSI, the GrapheneOS port survey, and the banking limits.
 6. [GmsCompat port](docs/06-gmscompat-port.md): commit order and prerequisites for porting GrapheneOS's sandboxed Google Play.
 7. [Maintenance](docs/07-maintenance.md): which layers get security fixes and from where, release keys, the periodic update procedure, and OTA delivery from GitHub.
+8. [Kernel](docs/08-kernel.md): our DragonHeart-based kernel, how GrapheneOS's 93 kernel hardening commits sort for 5.10, and the per-release kernel procedure.
 
 ## Layout
 

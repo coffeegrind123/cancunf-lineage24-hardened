@@ -17,7 +17,7 @@ On this phone each layer has a different source and cadence:
 | Android framework and system | LineageOS merges the monthly ASB into `lineage-24.0` | `repo sync` + rebuild. Monthly at best, and only when we release. |
 | Ported GrapheneOS code (GmsCompat, hardening) | GrapheneOS `17` branches | Re-port at each release (below). GmsCompat commits landed weekly through October 2026. |
 | Browser (Titanium) | Its author, every few days | Independent of the ROM, because it updates itself. The preload just has to keep the author's signature. |
-| Kernel | Prebuilt `5.10.240-DragonHeart` (cyberknight777), built 2026-05-05 | When `yaap/device_motorola_cancunf-kernel` updates its prebuilt, or when we build the kernel ourselves (a new compile job, which needs approval). **Upstream Linux 5.10 is scheduled to reach end of life around December 2026.** |
+| Kernel | Our fork [kernel_motorola_cancunf](https://github.com/coffeegrind123/kernel_motorola_cancunf) (DragonHeart base) | Each release: merge Google `android12-5.10` (security fixes plus 5.10 stable), DragonHeart's device commits, and GrapheneOS's hardening as it applies. See [08-kernel.md](08-kernel.md). Upstream 5.10 is maintained (5.10.274 on 2026-11-06); its end-of-life date is to be checked each cycle. |
 | Vendor blobs (MediaTek and Motorola HALs, IMS, drivers) | Motorola firmware, currently `V1TDS35H.83-20-5-11` (Android 15), according to the header of `proprietary-files.txt` | Only when Motorola ships newer firmware and the blobs are re-extracted. |
 | Firmware (preloader, lk, tee, gz, md1img modem, scp, sspm, ...) | Same Motorola build. The tree ships these images in `vendor/motorola/cancunf/radio/` and lists them in `AB_OTA_PARTITIONS` | **Every OTA flashes them.** Newer Motorola firmware reaches the phone through our own OTA once re-extracted. |
 
@@ -48,7 +48,7 @@ Run by the agent, after the owner approves the build:
 3. **Check what changed upstream**, and note each item in the release notes:
    - `yaap/device_motorola_cancunf@seventeen`: new commits since the last release. Read them before building.
    - The firmware version in the header of `proprietary-files.txt`. A change means new vendor blobs and firmware. **Read its `signing-info.txt` anti-rollback values before publishing**, because an increase is permanent for every installed phone.
-   - The kernel prebuilt's version and date.
+   - The kernel: merge Google `android12-5.10`, pick up DragonHeart's new commits, and re-check GrapheneOS's kernel hardening ([08-kernel.md](08-kernel.md)). Then build our kernel and refresh our prebuilts.
    - Whether our `patches/` still apply: `build/apply-patches.sh`, where a conflict stops the run.
 4. **Re-port GrapheneOS.** For each repo in [06-gmscompat-port.md](06-gmscompat-port.md), list GrapheneOS's new commits since the last ported head recorded in [`ported.json`](../ported.json):
    - Follow-ups and `fixup!`s of ported features: cherry-pick them.

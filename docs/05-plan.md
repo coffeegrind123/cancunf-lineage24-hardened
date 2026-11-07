@@ -69,7 +69,7 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 - **Verified boot with our own keys.** Motorola offers no user-settable root of trust, so the bootloader stays unlocked. This is GrapheneOS's core property, so the result is materially weaker than GrapheneOS.
 - **MTE.** The Cortex-A78/A55 cores lack it.
 - **Secure-element features.** They depend on the Pixel Titan chip.
-- **Graphene's kernel patches.** They target Pixel kernels; this phone runs Motorola's prebuilt GKI 5.10.
+- **GrapheneOS's kernel patches as-is.** They target Pixel 6.1/6.18. Phase 9 backports what applies to our own 5.10 kernel.
 - **Modem, TEE and firmware updates.** Only Motorola can provide those.
 
 ## Banking
@@ -95,6 +95,7 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 6. **On-device coding agent with system access.** Details in the section below.
 7. **Preloaded apps:** Titanium Browser and Ovis. Details in the section below.
 8. **OTA updates from GitHub**, with the GrapheneOS Updater (LineageOS Updater as fallback) and a periodic re-port and release procedure. See [07-maintenance.md](07-maintenance.md).
+9. **Our own kernel**: a DragonHeart fork kept current with Google `android12-5.10` and GrapheneOS kernel hardening. See [08-kernel.md](08-kernel.md).
 
 ## Phase 6: pi with free access to the system
 
