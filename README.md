@@ -36,6 +36,9 @@ Nothing device-unique is in this repository: no images, serials, IMEIs or unlock
 
 ## Related work
 
+All sources used so far: [REFERENCES.md](REFERENCES.md).
+
+
 - [groxaxo/moto-g54-android17-lineageos24](https://github.com/groxaxo/moto-g54-android17-lineageos24): a LineageOS 24 GSI on cancunf via DSU. It registered IMS but calls were never tested. This repo takes the device-tree route instead ([why](docs/05-plan.md#why-not-a-gsi)).
 - Device trees: [yaap/device_motorola_cancunf](https://github.com/yaap/device_motorola_cancunf) and [PixelOS-Devices/android_device_motorola_cancunf](https://github.com/PixelOS-Devices/android_device_motorola_cancunf), `seventeen` branches.
 - [GrapheneOS](https://grapheneos.org): the source of GmsCompat and the hardening.
