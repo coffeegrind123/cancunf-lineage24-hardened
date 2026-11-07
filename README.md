@@ -13,6 +13,8 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
 | Root-free Play Integrity support | planned (phase 4) |
 | VoLTE calls / SMS | phase 5. No SIM yet, so only the no-SIM half can be verified |
+| pi coding agent with system access (privileged bridge, Computer Control) | planned (phase 6) |
+| Preloaded Titanium Browser and Ovis | planned (phase 7) |
 
 ## Docs
 

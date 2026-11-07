@@ -82,3 +82,39 @@ Every external source used so far, grouped by topic.
 ## Windows USB
 
 - [Zadig](https://zadig.akeo.ie) via [pbatard/libwdi v1.5.1](https://github.com/pbatard/libwdi/releases/tag/v1.5.1).
+
+## On-device agents and preloads (phase 6)
+
+- **pi:**
+  - [earendil-works/pi](https://github.com/earendil-works/pi) (formerly `badlogic/pi-mono`)
+  - [Termux guide](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/termux.md)
+  - [MCP](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md)
+- **Ovis and herdr:**
+  - [ovis.sh](https://ovis.sh/)
+  - [devswha/ovis](https://github.com/devswha/ovis)
+  - [herdrdev/herdr](https://github.com/herdrdev/herdr)
+  - [herdr #3857](https://github.com/herdrdev/herdr/issues/3857): Termux installation
+- **Browser:**
+  - [jqssun/android-titanium-browser](https://github.com/jqssun/android-titanium-browser)
+  - [Titanium Extension](https://github.com/jqssun/android-titanium-extension)
+  - [GrapheneOS Vanadium](https://github.com/GrapheneOS/Vanadium)
+- **Computer Control and AppFunctions:**
+  - [Android Computer Control (preview)](https://developer.android.com/ai/computer-control)
+  - [AppFunctions](https://developer.android.com/ai/appfunctions)
+  - [anotb/phone-use alternatives notes](https://github.com/anotb/phone-use)
+- **Phone-control agents surveyed:**
+  - [Operit](https://github.com/AAswordman/Operit)
+  - [Mobilerun](https://github.com/droidrun/mobilerun)
+  - [Mobilerun Portal](https://github.com/droidrun/mobilerun-portal)
+  - [mobile-mcp](https://github.com/mobile-next/mobile-mcp)
+  - [Android-MCP](https://github.com/CursorTouch/Android-MCP)
+  - [Open-AutoGLM](https://github.com/zai-org/Open-AutoGLM)
+  - [MobileAgent](https://github.com/X-PLUG/MobileAgent)
+  - [UI-TARS](https://github.com/bytedance/UI-TARS)
+  - [ClosePaw](https://github.com/imoonkey/closepaw)
+  - [termux-mcp](https://github.com/termuxgpt/termux-mcp)
+  - [mcpshell](https://github.com/xnet-admin-1/mcpshell)
+- **Privilege layer:**
+  - [Shizuku](https://github.com/RikkaApps/Shizuku)
+  - [Termux](https://github.com/termux/termux-app)
+  - [Termux:API](https://github.com/termux/termux-api)

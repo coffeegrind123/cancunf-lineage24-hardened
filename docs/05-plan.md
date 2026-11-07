@@ -92,3 +92,53 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 3. **Hardening**, one feature per build, each verified on the phone.
 4. **Integrity support** in the framework.
 5. **Calls and SMS end to end** once a SIM is available.
+6. **On-device coding agent with system access.** Details in the section below.
+7. **Preloaded apps:** Titanium Browser and Ovis. Details in the section below.
+
+## Phase 6: pi with free access to the system
+
+No mature project combines an on-device coding agent with privileged control of the system. The pieces exist:
+
+- **pi** ([earendil-works/pi](https://github.com/earendil-works/pi), MIT) officially supports Termux on Node 22. Custom tools plug in through MCP or `pi.registerTool` extensions, and extensions can intercept tool calls.
+- **Phone-use agents** mostly drive the phone from a PC over adb (mobile-mcp, Mobilerun, AutoGLM, Mobile-Agent).
+- **On-device MCP servers with system access** are all hobby projects with fewer than 50 stars.
+- **Shizuku** has had no release since 2025-05.
+
+Building the ROM ourselves lets us fill the gap properly:
+
+1. **pi in Termux**, shipped with the ROM: Termux, Termux:API, Node 22.
+2. **An agent bridge**: a priv-app signed with our platform key, running an MCP server on the phone that only the Termux uid (or a token holder) may connect to. It calls framework APIs directly:
+   - Settings, including Secure and Global (`WRITE_SECURE_SETTINGS`)
+   - installing and removing packages, granting permissions
+   - force-stopping and starting apps
+   - content providers
+   - `INJECT_EVENTS` input and screenshots
+   - its own AccessibilityService, enabled by default, for the UI tree
+3. **A built-in Shizuku replacement**: an init service in its own SELinux domain that runs `cmd`, `pm`, `am` and `settings` at shell-uid level. This avoids depending on unmaintained Shizuku.
+4. **Computer Control** (Android 17) for automating apps on a background virtual display.
+   - `LineageOS/android_frameworks_base@lineage-24.0` has `libs/computercontrol/`.
+   - It declares `ACCESS_COMPUTER_CONTROL` as `internal|privileged`, behind the flag `android.companion.virtualdevice.flags.computer_control_access`.
+   - As the ROM builder we can grant it through `privapp-permissions` and give the bridge the assistant role.
+   - **Open question:** whether its allowlists and the `com.android.extensions.computercontrol` extension work from LineageOS sources, or need Google components.
+5. **Safety.** The bridge controls the whole phone, and anything the agent reads (pages, notifications, messages) can attempt prompt injection. So:
+   - a pi extension asks for confirmation before installs, permission grants and risky settings changes
+   - every bridge call is logged
+   - optionally, the agent runs in its own Android user
+
+## Preloaded apps
+
+**[Titanium Browser](https://github.com/jqssun/android-titanium-browser)**
+- About 3.1k stars, GPL-2.0, releases every few days. Chromium, based on GrapheneOS Vanadium, with extension support.
+- Shipped as a prebuilt arm64 APK (about 335 MB) with the author's signature kept (`PRESIGNED`), so its own updates from GitHub or Play keep installing over it.
+- It replaces the browser only. The system WebView is handled separately in phase 3.
+
+**[Ovis](https://github.com/devswha/ovis)**
+- About 1.9k stars, MIT. A chat and terminal client for [herdr](https://github.com/herdrdev/herdr), a Rust runtime that hosts coding agents, including pi, in panes.
+- Designed for a PC-side server with the phone as a remote client.
+- The Android app (`sh.ovis.app`, Capacitor, in `app/android`) is only a Play Store beta with no APK release, so we **build it from source** into the ROM. Signed with our key, it is updated with the ROM rather than from Play.
+
+Running Ovis against an agent **on the phone** has two unsupported pieces:
+- herdr's installer deliberately rejects Android. Its Linux arm64 binary was reported working in F-Droid Termux at v0.8.2 ([herdr #3857](https://github.com/herdrdev/herdr/issues/3857)), but not officially.
+- The Ovis server is Bun, which has no native Android/bionic build.
+
+The planned route is herdr plus the Ovis server inside a proot Debian in Termux, with the Ovis app connecting to `localhost:7317`. The same app also reaches pi on a PC. Both are unverified on Android 17 until tested on the phone.
