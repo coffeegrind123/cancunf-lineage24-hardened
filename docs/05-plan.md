@@ -36,7 +36,7 @@ Graphene's own commits on top of `android-17.0.0_r1` on branch `17`. The counts 
 
 | Repo | Commits on top of AOSP | Marked `gmscompat:` |
 |---|---|---|
-| frameworks/base | *pending* | *pending* |
+| frameworks/base | 538 | 19 (21 mention GMS or Play in total; counted via the GitHub API down to AOSP base `94b4c163`) |
 | packages/apps/Settings | 184 | 0 (but "per-app Play Integrity API settings", sandboxed Play links) |
 | build | 61 | 4 (GmsCompat app, `gmscompat_lib` signing keys) |
 | bionic | 56 | 2 (linker: open zips by fd path) |
