@@ -135,3 +135,12 @@ Every external source used so far, grouped by topic.
 - [kernel.org releases](https://www.kernel.org/category/releases.html): stable series and their end-of-life dates.
 - [GrapheneOS/kernel_common-6.1](https://github.com/GrapheneOS/kernel_common-6.1): GrapheneOS's kernel hardening (93 commits on `android14-6.1-lts`).
 - [LineageOS kernel.mk](https://github.com/LineageOS/android_vendor_lineage/blob/lineage-24.0/build/tasks/kernel.mk): building the kernel in-tree.
+
+## PixelOS (cancunf builds, spoofing, Pixel layer)
+
+- [PixelOS-AOSP](https://github.com/PixelOS-AOSP): the ROM's source, `seventeen` on `android-17.0.0_r1`.
+- [official_devices cancunf](https://github.com/PixelOS-AOSP/official_devices/tree/seventeen/API): device entry, updater JSON and [install guide](https://github.com/PixelOS-AOSP/official_devices/blob/seventeen/API/instructions/cancunf.md) (ARB warning for `V1TDS35H.83-20-5-14`, fastbootd vs preflash validation, bundled A15 firmware).
+- [pixelos.net/download/cancunf](https://pixelos.net/download/cancunf): latest official build, Android 16 (16.2, 2026-06-09).
+- [android_build_soong](https://github.com/PixelOS-AOSP/android_build_soong): LineageOS soong plus small tweaks.
+- [android_frameworks_base](https://github.com/PixelOS-AOSP/android_frameworks_base/tree/seventeen): `PlayIntegritySpoofService` and `PixelPropsUtils` (phase 4 source).
+- [android_vendor_custom pixel.mk](https://github.com/PixelOS-AOSP/android_vendor_custom/blob/seventeen/config/pixel.mk) and [the Pixel repos on GitLab](https://gitlab.com/PixelOS-AOSP) (phase 10).

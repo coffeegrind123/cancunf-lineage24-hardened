@@ -24,7 +24,9 @@ Observed on bootloader `MBM-3.1-cancunf_g_vext` with build `12-7-6`:
 
 **Visible difference:** v31.1 leaves a ramdisk of 1,118,033 bytes, v27.0 one of 1,511,163 bytes. The v31.1 ramdisk is smaller than stock's (1,380,092 bytes).
 
-The exact rule MBM applies is not known. Other Motorola owners report the same split: [Magisk #8389](https://github.com/topjohnwu/Magisk/issues/8389), and [#8373](https://github.com/topjohnwu/Magisk/issues/8373) on an XT2343-6.
+**Likely explanation:** [PixelOS's cancunf install guide](https://github.com/PixelOS-AOSP/official_devices/blob/seventeen/API/instructions/cancunf.md) says Motorola's bootloader runs a timestamp check on images flashed from bootloader-mode fastboot, and that flashing from **fastbootd** (`fastboot reboot fastboot`; confirm with `fastboot getvar is-userspace` → `yes`) avoids `Preflash validation failed`. This was not tested here; v27.0 may simply have passed the timestamp check.
+
+Other Motorola owners report the same split: [Magisk #8389](https://github.com/topjohnwu/Magisk/issues/8389), and [#8373](https://github.com/topjohnwu/Magisk/issues/8373) on an XT2343-6.
 
 **Route that works:**
 1. Patch the matching stock `boot.img` with **Magisk v27.0**. On-device patching works without the app: push `boot_patch.sh`, `util_functions.sh`, `stub.apk` and the `libmagisk*` binaries, then run it as the shell user.
@@ -32,7 +34,7 @@ The exact rule MBM applies is not known. Other Motorola owners report the same s
 3. Install the v27.0 app.
 4. If you want a newer Magisk, update from inside the app with **Direct install**, which avoids fastboot entirely.
 
-There is no `fastboot boot` (temporary boot), so root has to be flashed.
+There is no `fastboot boot` (temporary boot), so root has to be flashed. Try fastbootd first before falling back to v27.0.
 
 ## Shell root prompt
 

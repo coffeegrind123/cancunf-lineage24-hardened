@@ -80,6 +80,8 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 - **The "device" verdict now needs hardware-backed attestation from an unrevoked keybox.** The keyboxes in circulation are other vendors' leaked private keys. This project does not source or ship one. The mechanism accepts a user-supplied keybox.
 - **Without one, expect "basic" integrity only.** Some banks accept that; many don't.
 - Relocking the bootloader with a custom OS is not possible on this phone.
+- **Source to port:** PixelOS `frameworks_base@seventeen` has `core/java/android/security/pif/PlayIntegritySpoofService.java` and `core/java/com/android/internal/util/custom/PixelPropsUtils.java`, from the commit "spoof: Add Play Integrity spoofing with appcompat overrides" (2026-11-08). It handles the DroidGuard keybox path, spoofs a Pixel 10 Pro XL for GMS, and is configured through `Settings.Secure`. It is on the same Android 17 base and Apache-2.0. It is brand new, so pick up its follow-up fixes when porting.
+- **Why LineageOS and not PixelOS as the base:** PixelOS builds for cancunf and is maintained by the device trees' author, but LineageOS is the more conservative and trusted base for security. We port selected PixelOS pieces (this spoofing, the Pixel look below) instead.
 
 ## Phases
 
@@ -96,6 +98,7 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 7. **Preloaded apps:** Titanium Browser and Ovis. Details in the section below.
 8. **OTA updates from GitHub**, with the GrapheneOS Updater (LineageOS Updater as fallback) and a periodic re-port and release procedure. See [07-maintenance.md](07-maintenance.md).
 9. **Our own kernel**: a DragonHeart fork kept current with Google `android12-5.10` and GrapheneOS kernel hardening. See [08-kernel.md](08-kernel.md).
+10. **Pixel look and feel**: Pixel fonts, sounds, clocks, ThemePicker and optionally Pixel Launcher, from PixelOS's Pixel vendor repos. Details in the section below.
 
 ## Phase 6: pi with free access to the system
 
@@ -126,6 +129,20 @@ Building the ROM ourselves lets us fill the gap properly:
    - a pi extension asks for confirmation before installs, permission grants and risky settings changes
    - every bridge call is logged
    - optionally, the agent runs in its own Android user
+
+## Phase 10: Pixel look and feel
+
+PixelOS's Pixel features are a separate layer of Google binaries extracted from Pixel firmware, not part of its base. `vendor/custom/config/pixel.mk` in [PixelOS-AOSP/android_vendor_custom](https://github.com/PixelOS-AOSP/android_vendor_custom/blob/seventeen/config/pixel.mk) pulls them from public GitLab repos (`gitlab.com/PixelOS-AOSP/proprietary_vendor_pixel_*`, all with `seventeen` branches, checked 2026-11-09):
+
+| Repo | What | Plan |
+|---|---|---|
+| `gsans`, `sounds`, `clocks` | Google Sans font, ringtones/notification sounds/wallpapers, lock-screen clocks | Add. Plain files and small APKs. |
+| `themepicker` | Pixel wallpaper and style picker | Add. Uses the framework's theming, which LineageOS has. |
+| `launcher` | Pixel Launcher | Optional, behind a build flag. As recents provider it needs framework config, and its search bar expects the Google app. Test it alongside GmsCompat. |
+| `gms-17` | Google apps as privileged system apps | **Left out.** It contradicts GmsCompat's sandboxed Play. |
+
+- These are Google's proprietary files. They are pulled into the tree at build time through the local manifest (with `android_vendor_pixel_extract-utils`), and never committed to this repo.
+- Pixel-hardware features (Call Screen, Now Playing, Tensor camera processing) don't work on any non-Pixel phone.
 
 ## Preloaded apps
 

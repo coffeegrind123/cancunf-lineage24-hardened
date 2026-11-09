@@ -23,7 +23,9 @@ On this phone each layer has a different source and cadence:
 
 So the framework layer can track monthly patches. The kernel, vendor and firmware layers move only as fast as Motorola and the kernel maintainer, which is well behind a Pixel running GrapheneOS. The "Android security patch" date in Settings reflects only the framework layer.
 
-**First install and anti-rollback.** Because the OTA carries Android 15 firmware, the first install moves the bootloader chain from the stock Android 14 `12-7-6` firmware to Android 15. This raises anti-rollback, so restoring a `12-7-6` backup exactly becomes impossible afterwards. Restoring to stock is still possible, to Android 15 stock firmware. Per-device partitions (IMEI, calibration) are not touched by the firmware images.
+**Never flash or accept stock firmware newer than the blobs.** According to PixelOS's install guide, stock `V1TDS35H.83-20-5-14` (and `V1TDS35H.83-20-5-8-2-1-3` in Brazil) raises anti-rollback again, after which flashing ROMs built on older firmware **hardbricks the phone**. Turn off stock system updates before unlocking, and never ship firmware in our OTA beyond what the vendor blobs were extracted from. Before adopting newer Motorola firmware, check its anti-rollback values against what every installed phone runs.
+
+**First install and anti-rollback.** Because the OTA carries Android 15 firmware, the first install moves the bootloader chain from the stock Android 14 `12-7-6` firmware to Android 15. This raises anti-rollback, so restoring a `12-7-6` backup exactly becomes impossible afterwards. Restoring to stock is still possible, to Android 15 stock firmware. PixelOS confirms the ROM zip itself is the firmware step: no separate stock Android 15 flash is needed. A phone on firmware older than `U1TDS34.94-12-7-5` must flash the first build twice so both slots get post-ARB firmware. Per-device partitions (IMEI, calibration) are not touched by the firmware images.
 
 ## Release keys
 
@@ -69,8 +71,9 @@ Run by the agent, after the owner approves the build:
 ## OTA delivery from GitHub
 
 **Hosting.** Updates are GitHub release assets on this repo.
-- GitHub limits each release file to under 2 GiB. A full OTA with firmware has to fit, so measure the size on the first build.
-- If a full OTA exceeds the limit, it needs other hosting. Incrementals are small.
+- GitHub limits each release file to under 2 GiB. **A full cancunf OTA will not fit:** PixelOS's comparable full zip is 2.81 GB (`PixelOS_cancunf-16.2-20260609-0618.zip`).
+- So full OTAs need other hosting (PixelOS uses its own server plus SourceForge). The metadata and incrementals can stay on GitHub releases, with the full package's URL pointing at that host.
+- Measure our sizes on the first build, then pick the host.
 
 **Updater on the phone: the GrapheneOS Updater**
 ([GrapheneOS/platform_packages_apps_Updater](https://github.com/GrapheneOS/platform_packages_apps_Updater), MIT, branch `17`)

@@ -16,6 +16,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | pi coding agent with system access (privileged bridge, Computer Control) | planned (phase 6) |
 | Preloaded Titanium Browser and Ovis | planned (phase 7) |
 | OTA updates from GitHub releases (GrapheneOS Updater), periodic re-port | planned (phase 8), runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
+| Pixel look and feel (fonts, sounds, clocks, ThemePicker, optional Pixel Launcher) from PixelOS's Pixel repos | planned (phase 10) |
 | Own kernel ([fork](https://github.com/coffeegrind123/kernel_motorola_cancunf)): Google `android12-5.10` fixes plus GrapheneOS hardening | planned (phase 9), [docs/08-kernel.md](docs/08-kernel.md) |
 
 ## Docs
