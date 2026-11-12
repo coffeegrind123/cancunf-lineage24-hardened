@@ -1,0 +1,36 @@
+From c7e8b90997eb635cecd30dd74d370ffe087f849f Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 23:55:34 +0000
+Subject: [PATCH] soong: Forward Go runtime tuning to soong_build
+
+soong_build runs with only invocationEnv, so GOMEMLIMIT, GOGC and
+GODEBUG set for the build never reach it. Forward them when set, so a
+memory-capped host can bound the analysis heap and trace GC.
+
+Change-Id: I45429969f4d5f418d04dc9386f4fbfe20ed760a5
+---
+ ui/build/soong.go | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/ui/build/soong.go b/ui/build/soong.go
+index 4521b4a..ed4ad20 100644
+--- a/ui/build/soong.go
++++ b/ui/build/soong.go
+@@ -215,6 +215,14 @@ func (pb PrimaryBuilderFactory) primaryBuilderInvocation(config Config) bootstra
+ 
+ 	commonArgs = append(commonArgs, "-l", filepath.Join(pb.config.FileListDir(), "Android.bp.list"))
+ 	invocationEnv := make(map[string]string)
++	// soong_build sees only invocationEnv, so Go runtime tuning set for the
++	// build (a heap limit on a memory-capped host, or gctrace) never reaches
++	// it. Forward those variables when they are set.
++	for _, v := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG"} {
++		if value, ok := pb.config.Environment().Get(v); ok {
++			invocationEnv[v] = value
++		}
++	}
+ 	if pb.debugPort != "" {
+ 		//debug mode
+ 		commonArgs = append(commonArgs, "--delve_listen", pb.debugPort,
+-- 
+2.43.0
+

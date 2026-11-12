@@ -1,0 +1,31 @@
+From 6a2bacf2564a1ae26304eb1027b4f1600703a4d5 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 16:09:49 +0000
+Subject: [PATCH] java: Give the KSP client the kotlinc heap size
+
+The KSP client runs through jar-wrapper.sh with no -Xmx, so the JVM
+picks a quarter of the memory it can see. Inside a memory-capped
+container that is about 2 GB, and KSP on SystemUI-core runs out of Java
+heap. Pass the same explicit heap as kotlinc.
+
+Change-Id: I7237b7b4f4c0cdce73c181134970abe03c323023
+---
+ java/kotlin.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/java/kotlin.go b/java/kotlin.go
+index f47a169..e966ecf 100644
+--- a/java/kotlin.go
++++ b/java/kotlin.go
+@@ -475,7 +475,7 @@ var kspProcessingRule = pctx.AndroidRemoteStaticRule("ksp", android.RemoteRuleSu
+ 			` . ${config.UsePartialCompileFile} && ` +
+ 			inputDeltaCmd + ` && ` +
+ 			kotlinZipSyncCmd + ` && ` +
+-			`${config.KotlinKspClientBinary} ` +
++			`${config.KotlinKspClientBinary} ${config.KotlincHeapFlags} ` +
+ 			` -jvm-target=$kotlinJvmTarget ` +
+ 			` -project-base-dir=. ` +
+ 			` -module-name=$name ` +
+-- 
+2.43.0
+

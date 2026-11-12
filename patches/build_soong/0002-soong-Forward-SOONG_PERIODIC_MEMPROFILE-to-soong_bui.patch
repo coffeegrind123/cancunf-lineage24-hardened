@@ -1,0 +1,26 @@
+From bd16ed70abfbbd8b4102dc5f85471aa19c4d62f5 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 05:39:22 +0000
+Subject: [PATCH] soong: Forward SOONG_PERIODIC_MEMPROFILE to soong_build
+
+Change-Id: I92da2026b0791c33bd251cf4d95585379bb83ef9
+---
+ ui/build/soong.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ui/build/soong.go b/ui/build/soong.go
+index ed4ad20..4828dee 100644
+--- a/ui/build/soong.go
++++ b/ui/build/soong.go
+@@ -218,7 +218,7 @@ func (pb PrimaryBuilderFactory) primaryBuilderInvocation(config Config) bootstra
+ 	// soong_build sees only invocationEnv, so Go runtime tuning set for the
+ 	// build (a heap limit on a memory-capped host, or gctrace) never reaches
+ 	// it. Forward those variables when they are set.
+-	for _, v := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG"} {
++	for _, v := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG", "SOONG_PERIODIC_MEMPROFILE"} {
+ 		if value, ok := pb.config.Environment().Get(v); ok {
+ 			invocationEnv[v] = value
+ 		}
+-- 
+2.43.0
+

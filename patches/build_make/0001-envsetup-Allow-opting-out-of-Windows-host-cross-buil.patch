@@ -1,0 +1,35 @@
+From dc37d8b41e0b3080a7c7c1becea052850b4312dc Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 00:40:08 +0000
+Subject: [PATCH] envsetup: Allow opting out of Windows host cross builds
+
+Windows variants of every host module that supports them add a lot to
+Soong analysis memory, and a device build never uses them. Treat
+DISABLE_HOST_CROSS_WINDOWS=true like BUILD_HOST_static and leave
+HOST_CROSS_OS empty, which is already a supported configuration.
+
+Change-Id: I1fecd986767b68cb1596132540c93634e95c0acc
+---
+ core/envsetup.mk | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/core/envsetup.mk b/core/envsetup.mk
+index eb32154..beef002 100644
+--- a/core/envsetup.mk
++++ b/core/envsetup.mk
+@@ -147,8 +147,10 @@ ifeq ($(HOST_OS),linux)
+   # Windows has been the default host_cross OS
+   ifeq (,$(filter-out windows,$(HOST_CROSS_OS)))
+     # We can only create static host binaries for Linux, so if static host
+-    # binaries are requested, turn off Windows cross-builds.
+-    ifeq ($(BUILD_HOST_static),)
++    # binaries are requested, turn off Windows cross-builds. Device builds can
++    # also opt out: Windows variants of every host module add a lot to Soong
++    # analysis memory and a device image never uses them.
++    ifeq ($(BUILD_HOST_static)$(filter true,$(DISABLE_HOST_CROSS_WINDOWS)),)
+       HOST_CROSS_OS := windows
+       HOST_CROSS_ARCH := x86
+       HOST_CROSS_2ND_ARCH := x86_64
+-- 
+2.43.0
+

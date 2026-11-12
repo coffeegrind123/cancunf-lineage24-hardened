@@ -1,0 +1,42 @@
+From 19b4faee511f6dd1ba79e86be93b474c52fad361 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 00:28:24 +0000
+Subject: [PATCH] Sort SourceRootDirs once, not on every lookup
+
+SourceRootDirAllowed sorted the shared prefix slice on every call, and it
+is called from the parallel Android.bp parse goroutines. With a long
+PRODUCT_SOURCE_ROOT_DIRS list the concurrent sorts race, a lookup can
+miss a prefix, and a file that should be skipped is parsed (seen as
+namespace errors from pruned trees). Sort once in Add instead.
+
+Change-Id: Ie933b11315663ce6a2156ed36b5d0f609f6a7db4
+---
+ context.go | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/context.go b/context.go
+index 790c2d2..560c725 100644
+--- a/context.go
++++ b/context.go
+@@ -270,12 +270,15 @@ type SourceRootDirs struct {
+ 
+ func (dirs *SourceRootDirs) Add(names ...string) {
+ 	dirs.dirs = append(dirs.dirs, names...)
+-}
+-
+-func (dirs *SourceRootDirs) SourceRootDirAllowed(path string) (bool, string) {
++	// Sort here, once, rather than in SourceRootDirAllowed: that runs on the
++	// parallel parse goroutines, and sorting the shared slice there races, so
++	// a lookup can miss a prefix and parse a file that should be skipped.
+ 	sort.Slice(dirs.dirs, func(i, j int) bool {
+ 		return len(dirs.dirs[i]) < len(dirs.dirs[j])
+ 	})
++}
++
++func (dirs *SourceRootDirs) SourceRootDirAllowed(path string) (bool, string) {
+ 	last := len(dirs.dirs)
+ 	for i := range dirs.dirs {
+ 		// iterate from longest paths (most specific)
+-- 
+2.43.0
+
