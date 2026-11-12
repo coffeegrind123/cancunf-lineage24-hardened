@@ -1,0 +1,82 @@
+From 412293f049af644f14b0437c276f155777a01c26 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 23:11:31 +0000
+Subject: [PATCH] cancunf: Resolve blob names that collide on LineageOS 24
+
+- libformatter is now a host Rust library, so rename the blob with
+  FIX_SONAME and point the codec2 libraries at it, as lyriq does.
+- hardware/mediatek now builds libladder (stub) and wlan_assistant, so
+  drop those blobs, as other MediaTek trees do. Moto wlan_assistant only
+  picks a custom nvram file for austin, saipan, devonn and maui; on
+  cancunf it uses the default WIFI file, same as the source build.
+---
+ device.mk             | 1 +
+ extract-files.py      | 5 +++++
+ proprietary-files.txt | 6 +-----
+ 3 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/device.mk b/device.mk
+index 0a09a4b..6c9046d 100644
+--- a/device.mk
++++ b/device.mk
+@@ -444,6 +444,7 @@ PRODUCT_PACKAGES += \
+ 
+ PRODUCT_PACKAGES += \
+     hostapd \
++    wlan_assistant \
+     wpa_supplicant
+ 
+ PRODUCT_COPY_FILES += \
+diff --git a/extract-files.py b/extract-files.py
+index 619c2b8..1fad7d5 100755
+--- a/extract-files.py
++++ b/extract-files.py
+@@ -97,6 +97,11 @@ blob_fixups: blob_fixups_user_type = {
+         'vendor/lib64/lib3a.ae.pipe.so'
+     ): blob_fixup()
+         .add_needed('liblog.so'),
++    (
++        'vendor/lib64/libcodec2_mtk_vdec.so',
++        'vendor/lib64/libcodec2_mtk_venc.so',
++    ): blob_fixup()
++        .replace_needed('libformatter.so', 'libformatter_mtk.so'),
+     'vendor/lib64/mt6855/libmnl_mtk.so': blob_fixup()
+         .add_needed('libcutils.so'),
+     'vendor/etc/vintf/manifest/manifest_media_c2_V1_2_default.xml': blob_fixup()
+diff --git a/proprietary-files.txt b/proprietary-files.txt
+index e739647..98f1b60 100644
+--- a/proprietary-files.txt
++++ b/proprietary-files.txt
+@@ -1,9 +1,7 @@
+ # Device proprietary files - From cancunf_g_sys-user 15 V1TDS35H.83-20-5-11 b11610 release-keys, unless pinned
+ 
+ # AEE
+-vendor/lib/libladder.so
+ vendor/lib/libudf.so
+-vendor/lib64/libladder.so
+ vendor/lib64/libudf.so
+ 
+ # Audio
+@@ -2275,7 +2273,7 @@ vendor/lib64/libcodec2_mtk_vdec.so
+ vendor/lib64/libcodec2_mtk_venc.so
+ vendor/lib64/libcodec2_vpp_qt_plugin.so
+ vendor/lib64/libcodec2_vpp_rs_plugin.so
+-vendor/lib64/libformatter.so
++vendor/lib64/libformatter.so:vendor/lib64/libformatter_mtk.so;FIX_SONAME
+ vendor/lib64/libhdrvideo.so
+ vendor/lib64/libicd_decoder.so
+ vendor/lib64/libjpeg-alpha-oal_vendor.so
+@@ -2828,10 +2826,8 @@ vendor/lib64/libvcodecdrv_header_stub.so
+ vendor/bin/stp_dump3
+ vendor/bin/wifi_dump
+ vendor/bin/wifitest
+-vendor/bin/wlan_assistant
+ vendor/bin/wmt_launcher
+ vendor/bin/wmt_loader
+-vendor/etc/init/wlan_assistant.rc
+ vendor/lib/meta_wifi_data.so
+ vendor/lib64/libwifitest.so
+ vendor/lib64/meta_wifi_data.so
+-- 
+2.43.0
+

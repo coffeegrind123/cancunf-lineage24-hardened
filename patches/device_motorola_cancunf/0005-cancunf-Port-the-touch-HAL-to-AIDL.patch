@@ -1,0 +1,362 @@
+From 1c2660bc5d290c93f1351e30cac26c276458fc2d Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 22:59:29 +0000
+Subject: [PATCH] cancunf: Port the touch HAL to AIDL
+
+LineageOS 24 dropped the HIDL vendor.lineage.touch@1.0 interface. Serve
+the same single-tap gesture over vendor.lineage.touch-V1, following
+motorola/sm8475-common, and update the service label.
+---
+ device.mk                                     |  2 +-
+ sepolicy/vendor/file_contexts                 |  2 +-
+ touch/Android.bp                              | 25 +++-------
+ touch/TouchscreenGesture.cpp                  | 47 +++++++------------
+ touch/TouchscreenGesture.h                    | 45 ++++--------------
+ touch/service.cpp                             | 45 ++++++------------
+ ...> vendor.lineage.touch-service.cancunf.rc} |  3 +-
+ .../vendor.lineage.touch-service.cancunf.xml  |  7 +++
+ ...ndor.lineage.touch@1.0-service.cancunf.xml | 11 -----
+ 9 files changed, 57 insertions(+), 130 deletions(-)
+ rename touch/{vendor.lineage.touch@1.0-service.cancunf.rc => vendor.lineage.touch-service.cancunf.rc} (58%)
+ create mode 100644 touch/vendor.lineage.touch-service.cancunf.xml
+ delete mode 100644 touch/vendor.lineage.touch@1.0-service.cancunf.xml
+
+diff --git a/device.mk b/device.mk
+index fc13851..0a09a4b 100644
+--- a/device.mk
++++ b/device.mk
+@@ -419,7 +419,7 @@ PRODUCT_COPY_FILES += \
+ 
+ # Touch
+ PRODUCT_PACKAGES += \
+-    vendor.lineage.touch@1.0-service.cancunf
++    vendor.lineage.touch-service.cancunf
+ 
+ # USB
+ $(call soong_config_set_bool,android_hardware_mediatek_usb,audio_accessory_supported,true)
+diff --git a/sepolicy/vendor/file_contexts b/sepolicy/vendor/file_contexts
+index 7d7641f..5dad5ee 100644
+--- a/sepolicy/vendor/file_contexts
++++ b/sepolicy/vendor/file_contexts
+@@ -49,7 +49,7 @@
+ /vendor/bin/hw/android\.hardware\.power-service\.pixel-libperfmgr                      u:object_r:hal_power_default_exec:s0
+ 
+ # Touch
+-/vendor/bin/hw/vendor\.lineage\.touch@1\.0-service\.cancunf                                 u:object_r:hal_lineage_touch_default_exec:s0
++/vendor/bin/hw/vendor\.lineage\.touch-service\.cancunf                                       u:object_r:hal_lineage_touch_default_exec:s0
+ 
+ # Wakeups
+ /sys/devices/platform/soc/[^*]+/wakeup/wakeup[0-9]+(/.*)?                              u:object_r:sysfs_wakeup:s0
+diff --git a/touch/Android.bp b/touch/Android.bp
+index 5ae079f..7caf68d 100644
+--- a/touch/Android.bp
++++ b/touch/Android.bp
+@@ -1,23 +1,12 @@
+ //
+ // SPDX-FileCopyrightText: The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
+ //
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-//      http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+ 
+ cc_binary {
+-    name: "vendor.lineage.touch@1.0-service.cancunf",
+-    defaults: ["hidl_defaults"],
+-    vintf_fragments: ["vendor.lineage.touch@1.0-service.cancunf.xml"],
+-    init_rc: ["vendor.lineage.touch@1.0-service.cancunf.rc"],
++    name: "vendor.lineage.touch-service.cancunf",
++    vintf_fragments: ["vendor.lineage.touch-service.cancunf.xml"],
++    init_rc: ["vendor.lineage.touch-service.cancunf.rc"],
+     relative_install_path: "hw",
+     proprietary: true,
+     srcs: [
+@@ -26,9 +15,9 @@ cc_binary {
+     ],
+     shared_libs: [
+         "libbase",
+-        "libbinder",
+-        "libhidlbase",
++        "libbinder_ndk",
++        "liblog",
+         "libutils",
+-        "vendor.lineage.touch@1.0",
++        "vendor.lineage.touch-V1-ndk",
+     ],
+ }
+diff --git a/touch/TouchscreenGesture.cpp b/touch/TouchscreenGesture.cpp
+index fbe4037..ca09439 100644
+--- a/touch/TouchscreenGesture.cpp
++++ b/touch/TouchscreenGesture.cpp
+@@ -1,60 +1,45 @@
+ /*
+  * SPDX-FileCopyrightText: The LineageOS Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
++ * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+ #define LOG_TAG "TouchscreenGestureService"
+ 
+-#include <fstream>
++#include "TouchscreenGesture.h"
+ 
+ #include <android-base/file.h>
+ #include <android-base/logging.h>
+ 
+-#include "TouchscreenGesture.h"
+-
++namespace aidl {
+ namespace vendor {
+ namespace lineage {
+ namespace touch {
+-namespace V1_0 {
+-namespace implementation {
+ 
+-Return<void> TouchscreenGesture::getSupportedGestures(getSupportedGestures_cb resultCb) {
++ndk::ScopedAStatus TouchscreenGesture::getSupportedGestures(std::vector<Gesture>* _aidl_return) {
+     std::vector<Gesture> gestures;
+     for (int32_t i = 0; i < std::size(kGestureNodes); ++i) {
+         gestures.push_back({i, kGestureNodes[i].name, kGestureNodes[i].keycode});
+     }
+-    resultCb(gestures);
+-    return Void();
++
++    *_aidl_return = gestures;
++    return ndk::ScopedAStatus::ok();
+ }
+ 
+-Return<bool> TouchscreenGesture::setGestureEnabled(
+-    const ::vendor::lineage::touch::V1_0::Gesture& gesture, bool enable) {
+-    if (gesture.id >= std::size(kGestureNodes)) {
+-        return false;
++ndk::ScopedAStatus TouchscreenGesture::setGestureEnabled(const Gesture& gesture, bool enabled) {
++    if (gesture.id < 0 || gesture.id >= std::size(kGestureNodes)) {
++        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
+     }
+ 
+-    if (!android::base::WriteStringToFile(enable ? kGestureNodes[gesture.id].enable : kGestureNodes[gesture.id].disable,
+-                                          kGestureNodes[gesture.id].path)) {
+-        LOG(ERROR) << "Writing to file " << kGestureNodes[gesture.id].path << " failed";
+-        return false;
++    const GestureInfo& node = kGestureNodes[gesture.id];
++    if (!android::base::WriteStringToFile(enabled ? node.enable : node.disable, node.path)) {
++        PLOG(ERROR) << "Writing to file " << node.path << " failed";
++        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+     }
+ 
+-    return true;
++    return ndk::ScopedAStatus::ok();
+ }
+ 
+-}  // namespace implementation
+-}  // namespace V1_0
+ }  // namespace touch
+ }  // namespace lineage
+ }  // namespace vendor
++}  // namespace aidl
+diff --git a/touch/TouchscreenGesture.h b/touch/TouchscreenGesture.h
+index 9bfb478..0fb645c 100644
+--- a/touch/TouchscreenGesture.h
++++ b/touch/TouchscreenGesture.h
+@@ -1,24 +1,11 @@
+ /*
+  * SPDX-FileCopyrightText: The LineageOS Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
++ * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+ #pragma once
+ 
+-#include <vendor/lineage/touch/1.0/ITouchscreenGesture.h>
+-
+-#include <map>
++#include <aidl/vendor/lineage/touch/BnTouchscreenGesture.h>
+ 
+ namespace {
+ struct GestureInfo {
+@@ -30,35 +17,23 @@ struct GestureInfo {
+ };
+ 
+ constexpr GestureInfo kGestureNodes[] = {
+-        {0x2c2,
+-         "Single Tap",
+-         "/sys/devices/virtual/touchscreen/primary/single_tap_enabled",
+-         "1", "0"},
++        {0x2c2, "Single Tap", "/sys/devices/virtual/touchscreen/primary/single_tap_enabled", "1",
++         "0"},
+ };
+ }  // anonymous namespace
+ 
++namespace aidl {
+ namespace vendor {
+ namespace lineage {
+ namespace touch {
+-namespace V1_0 {
+-namespace implementation {
+-
+-using ::android::hardware::Return;
+-using ::android::hardware::Void;
+ 
+-class TouchscreenGesture : public ITouchscreenGesture {
+-   public:   
+-    // Methods from ::vendor::lineage::touch::V1_0::ITouchscreenGesture follow.
+-    Return<void> getSupportedGestures(getSupportedGestures_cb resultCb) override;
+-    Return<bool> setGestureEnabled(
+-        const ::vendor::lineage::touch::V1_0::Gesture& gesture, bool enable) override;
+-    
+-   private:
+-    std::map<int32_t, GestureInfo> kGestureInfoMap;
++class TouchscreenGesture : public BnTouchscreenGesture {
++  public:
++    ndk::ScopedAStatus getSupportedGestures(std::vector<Gesture>* _aidl_return) override;
++    ndk::ScopedAStatus setGestureEnabled(const Gesture& gesture, bool enabled) override;
+ };
+ 
+-}  // namespace implementation
+-}  // namespace V1_0
+ }  // namespace touch
+ }  // namespace lineage
+ }  // namespace vendor
++}  // namespace aidl
+diff --git a/touch/service.cpp b/touch/service.cpp
+index 57f2c88..4f1d827 100644
+--- a/touch/service.cpp
++++ b/touch/service.cpp
+@@ -1,43 +1,26 @@
+ /*
+  * SPDX-FileCopyrightText: The LineageOS Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
++ * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-#define LOG_TAG "lineage.touch@1.0-service.cancunf"
+-
+-#include <android-base/logging.h>
+-#include <hidl/HidlTransportSupport.h>
++#define LOG_TAG "vendor.lineage.touch-service.cancunf"
+ 
+ #include "TouchscreenGesture.h"
+ 
+-using ::vendor::lineage::touch::V1_0::ITouchscreenGesture;
+-using ::vendor::lineage::touch::V1_0::implementation::TouchscreenGesture;
+-
+-int main() {
+-    android::sp<ITouchscreenGesture> touchscreenGesture = new TouchscreenGesture();
+-
+-    android::hardware::configureRpcThreadpool(1, true /*callerWillJoin*/);
++#include <android-base/logging.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
+ 
+-    if (touchscreenGesture->registerAsService() != android::OK) {
+-        LOG(ERROR) << "Cannot register touchscreen gesture HAL service.";
+-        return 1;
+-    }
++using aidl::vendor::lineage::touch::TouchscreenGesture;
+ 
+-    LOG(INFO) << "Touchscreen HAL service ready.";
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(0);
+ 
+-    android::hardware::joinRpcThreadpool();
++    std::shared_ptr<TouchscreenGesture> tg = ndk::SharedRefBase::make<TouchscreenGesture>();
++    const std::string instance = std::string(TouchscreenGesture::descriptor) + "/default";
++    binder_status_t status = AServiceManager_addService(tg->asBinder().get(), instance.c_str());
++    CHECK_EQ(status, STATUS_OK) << "Failed to add service " << instance << " " << status;
+ 
+-    LOG(ERROR) << "Touchscreen HAL service failed to join thread pool.";
+-    return 1;
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
+ }
+diff --git a/touch/vendor.lineage.touch@1.0-service.cancunf.rc b/touch/vendor.lineage.touch-service.cancunf.rc
+similarity index 58%
+rename from touch/vendor.lineage.touch@1.0-service.cancunf.rc
+rename to touch/vendor.lineage.touch-service.cancunf.rc
+index 39df72c..2f18214 100644
+--- a/touch/vendor.lineage.touch@1.0-service.cancunf.rc
++++ b/touch/vendor.lineage.touch-service.cancunf.rc
+@@ -2,8 +2,7 @@ on post-fs
+     chown system system /sys/devices/virtual/touchscreen/primary/single_tap_enabled
+     chmod 0664 /sys/devices/virtual/touchscreen/primary/single_tap_enabled
+ 
+-service vendor.touch-hal-1-0 /vendor/bin/hw/vendor.lineage.touch@1.0-service.cancunf
+-    interface vendor.lineage.touch@1.0::ITouchscreenGesture default
++service vendor.touch-hal-cancunf /vendor/bin/hw/vendor.lineage.touch-service.cancunf
+     class hal
+     user system
+     group system
+diff --git a/touch/vendor.lineage.touch-service.cancunf.xml b/touch/vendor.lineage.touch-service.cancunf.xml
+new file mode 100644
+index 0000000..09c0d7f
+--- /dev/null
++++ b/touch/vendor.lineage.touch-service.cancunf.xml
+@@ -0,0 +1,7 @@
++<manifest version="1.0" type="device">
++    <hal format="aidl">
++        <name>vendor.lineage.touch</name>
++        <version>1</version>
++        <fqname>ITouchscreenGesture/default</fqname>
++    </hal>
++</manifest>
+diff --git a/touch/vendor.lineage.touch@1.0-service.cancunf.xml b/touch/vendor.lineage.touch@1.0-service.cancunf.xml
+deleted file mode 100644
+index fb862bb..0000000
+--- a/touch/vendor.lineage.touch@1.0-service.cancunf.xml
++++ /dev/null
+@@ -1,11 +0,0 @@
+-<manifest version="1.0" type="device">
+-    <hal format="hidl">
+-        <name>vendor.lineage.touch</name>
+-        <transport>hwbinder</transport>
+-        <version>1.0</version>
+-        <interface>
+-            <name>ITouchscreenGesture</name>
+-            <instance>default</instance>
+-        </interface>
+-    </hal>
+-</manifest>
+-- 
+2.43.0
+

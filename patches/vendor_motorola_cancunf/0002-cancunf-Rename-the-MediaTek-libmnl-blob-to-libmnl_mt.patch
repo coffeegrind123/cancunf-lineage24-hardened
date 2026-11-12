@@ -1,0 +1,86 @@
+From 0a579faf014bcda46ea412d09e33d9428ce6256a Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 22:46:52 +0000
+Subject: [PATCH] cancunf: Rename the MediaTek libmnl blob to libmnl_mtk
+
+Matches the device tree: FIX_SONAME on the renamed blob and mnld
+re-linked against it, so the vendor prebuilt no longer overrides
+external/libmnl, which is vendor_available on LineageOS 24.
+
+The blob rename and the patchelf edits are applied by
+build/apply-patches.sh, because this repo carries no proprietary files.
+---
+ Android.bp        | 12 ++++++------
+ cancunf-vendor.mk |  4 ++--
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/Android.bp b/Android.bp
+index 1fe5439..fc2a6ad 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -44464,7 +44464,7 @@ cc_prebuilt_library_shared {
+ }
+ 
+ cc_prebuilt_library_shared {
+-    name: "libmnl",
++    name: "libmnl_mtk",
+     owner: "motorola",
+     strip: {
+         none: true,
+@@ -44472,7 +44472,7 @@ cc_prebuilt_library_shared {
+     target: {
+         android_arm64: {
+             srcs: [
+-                "proprietary/vendor/lib64/mt6855/libmnl.so",
++                "proprietary/vendor/lib64/mt6855/libmnl_mtk.so",
+             ],
+             shared_libs: [
+                 "libcutils",
+@@ -51920,7 +51920,7 @@ cc_prebuilt_binary {
+             ],
+             shared_libs: [
+                 "android.hardware.sensors@1.0-convert-shared",
+-                "libmnl",
++                "libmnl_mtk",
+                 "libcurl",
+                 "libcutils",
+                 "libnvram",
+@@ -54419,10 +54419,10 @@ install_symlink {
+ }
+ 
+ install_symlink {
+-    name: "vendor_lib64_libmnl_so",
++    name: "vendor_lib64_libmnl_mtk_so",
+     soc_specific: true,
+-    installed_location: "lib64/libmnl.so",
+-    symlink_target: "/vendor/lib64/mt6855/libmnl.so",
++    installed_location: "lib64/libmnl_mtk.so",
++    symlink_target: "/vendor/lib64/mt6855/libmnl_mtk.so",
+ }
+ 
+ install_symlink {
+diff --git a/cancunf-vendor.mk b/cancunf-vendor.mk
+index de544f6..d89a040 100644
+--- a/cancunf-vendor.mk
++++ b/cancunf-vendor.mk
+@@ -1545,7 +1545,7 @@ PRODUCT_PACKAGES += \
+     libimageio_plat_pipe \
+     liblpcnr \
+     libmfllcore \
+-    libmnl \
++    libmnl_mtk \
+     libmsnr \
+     libmtkcam.debugwrapper \
+     libmtkcam.featurepipe.capture \
+@@ -2060,7 +2060,7 @@ PRODUCT_PACKAGES += \
+     vendor_lib64_libimageio_plat_pipe_so \
+     vendor_lib64_liblpcnr_so \
+     vendor_lib64_libmfllcore_so \
+-    vendor_lib64_libmnl_so \
++    vendor_lib64_libmnl_mtk_so \
+     vendor_lib64_libmpvr_so \
+     vendor_lib64_libmsnr_so \
+     vendor_lib64_libmtk_drvb_so \
+-- 
+2.43.0
+

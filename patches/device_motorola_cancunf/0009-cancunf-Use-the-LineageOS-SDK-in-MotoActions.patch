@@ -1,0 +1,70 @@
+From da54aa2685f737a71e4fce2567477dafe3f4e673 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 19:05:55 +0000
+Subject: [PATCH] cancunf: Use the LineageOS SDK in MotoActions
+
+MotoActions used YAAP framework copies of LineageHardwareManager,
+TouchscreenGesture and Settings.System.TOUCHSCREEN_GESTURE_HAPTIC_FEEDBACK,
+which LineageOS does not have. The LineageOS SDK provides the same
+classes, and the haptic switch lives in LineageSettings.System (same key
+LineageParts writes). Link the SDK the way LineageParts does.
+---
+ app/MotoActions/Android.bp                                  | 1 +
+ .../src/org/lineageos/settings/device/TouchKeyHandler.java  | 6 ++++--
+ .../settings/device/actions/TapGestureSettings.java         | 4 ++--
+ 3 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/app/MotoActions/Android.bp b/app/MotoActions/Android.bp
+index f8f7062..9f41ac3 100644
+--- a/app/MotoActions/Android.bp
++++ b/app/MotoActions/Android.bp
+@@ -12,6 +12,7 @@ android_app {
+     static_libs: [
+         "androidx.core_core",
+         "androidx.preference_preference",
++        "org.lineageos.platform.internal",
+         "org.lineageos.settings.resources",
+     ],
+ 
+diff --git a/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java b/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java
+index 8fada79..17b997c 100644
+--- a/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java
++++ b/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java
+@@ -40,6 +40,8 @@ import android.os.UserHandle;
+ import android.os.VibrationEffect;
+ import android.os.Vibrator;
+ import android.provider.Settings;
++
++import lineageos.providers.LineageSettings;
+ import android.util.Log;
+ import android.util.SparseIntArray;
+ import android.view.KeyEvent;
+@@ -328,8 +330,8 @@ public class TouchKeyHandler implements DeviceKeyHandler {
+         }
+ 
+         if (mAudioManager.getRingerMode() != AudioManager.RINGER_MODE_SILENT) {
+-            final boolean enabled = Settings.System.getInt(mContext.getContentResolver(),
+-                    Settings.System.TOUCHSCREEN_GESTURE_HAPTIC_FEEDBACK, 1) != 0;
++            final boolean enabled = LineageSettings.System.getInt(mContext.getContentResolver(),
++                    LineageSettings.System.TOUCHSCREEN_GESTURE_HAPTIC_FEEDBACK, 1) != 0;
+             if (enabled) {
+                 mVibrator.vibrate(VibrationEffect.get(VibrationEffect.EFFECT_HEAVY_CLICK));
+             }
+diff --git a/app/MotoActions/src/org/lineageos/settings/device/actions/TapGestureSettings.java b/app/MotoActions/src/org/lineageos/settings/device/actions/TapGestureSettings.java
+index 1c0cc70..05b89d9 100644
+--- a/app/MotoActions/src/org/lineageos/settings/device/actions/TapGestureSettings.java
++++ b/app/MotoActions/src/org/lineageos/settings/device/actions/TapGestureSettings.java
+@@ -35,8 +35,8 @@ import androidx.preference.PreferenceFragmentCompat;
+ import androidx.preference.PreferenceManager;
+ import androidx.preference.SwitchPreferenceCompat;
+ 
+-import com.android.internal.yaap.hardware.LineageHardwareManager; // Need FWB support
+-import com.android.internal.yaap.hardware.TouchscreenGesture; // Need FWB support
++import lineageos.hardware.LineageHardwareManager;
++import lineageos.hardware.TouchscreenGesture;
+ import org.lineageos.settings.device.Constants;
+ import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
+ import com.android.settingslib.widget.SettingsBasePreferenceFragment;
+-- 
+2.43.0
+

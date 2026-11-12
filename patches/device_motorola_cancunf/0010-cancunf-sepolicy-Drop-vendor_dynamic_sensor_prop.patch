@@ -1,0 +1,44 @@
+From 56f236d67d40429f3fc6cb3a2df3004a39e27880 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 19:52:35 +0000
+Subject: [PATCH] cancunf: sepolicy: Drop vendor_dynamic_sensor_prop
+
+device/mediatek/sepolicy_vndr now declares vendor_dynamic_sensor_prop
+and labels vendor.dynamic_sensor. itself, so declaring it here fails
+checkpolicy with a duplicate type.
+---
+ sepolicy/vendor/property.te       | 3 ---
+ sepolicy/vendor/property_contexts | 3 ---
+ 2 files changed, 6 deletions(-)
+
+diff --git a/sepolicy/vendor/property.te b/sepolicy/vendor/property.te
+index adba69b..a0ef0c8 100644
+--- a/sepolicy/vendor/property.te
++++ b/sepolicy/vendor/property.te
+@@ -1,9 +1,6 @@
+ # Camera
+ vendor_restricted_prop(vendor_mot_camera_prop);
+ 
+-# Dynamic sensor
+-vendor_internal_prop(vendor_dynamic_sensor_prop);
+-
+ # Motorola
+ vendor_public_prop(vendor_mot_prop);
+ 
+diff --git a/sepolicy/vendor/property_contexts b/sepolicy/vendor/property_contexts
+index 5ace089..c2ae4f0 100644
+--- a/sepolicy/vendor/property_contexts
++++ b/sepolicy/vendor/property_contexts
+@@ -2,9 +2,6 @@
+ persist.vendor.camera.privapp.list  u:object_r:vendor_persist_camera_prop:s0
+ vendor.mot_ota_tuning.valid      u:object_r:vendor_mot_camera_prop:s0
+ 
+-# Dynamic sensor
+-vendor.dynamic_sensor.                          u:object_r:vendor_dynamic_sensor_prop:s0
+-
+ # FPS
+ persist.vendor.hardware.fingerprint   u:object_r:vendor_mot_prop:s0
+ vendor.hw.fingerprint.status     u:object_r:vendor_mot_prop:s0
+-- 
+2.43.0
+

@@ -1,0 +1,124 @@
+From 08b7380cc720004b231b999fe7e4f28c286a3f4d Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 21:35:57 +0000
+Subject: [PATCH] cancunf: Finish porting MotoActions to LineageOS
+
+- The camera gesture used YAAP's Intent.ACTION_SCREEN_CAMERA_GESTURE;
+  use the LineageOS SDK action, which PhoneWindowManager also uses.
+- YAAP's DeviceKeyHandler has onPocketStateChanged, fed by its framework
+  pocket service; LineageOS has neither. Track the pocket state in the
+  handler from the wake-up proximity sensor while the screen is off, so
+  tap gestures stay ignored in a pocket.
+- LineageOS 24 dropped doze_settings_help_{title,text} from
+  org.lineageos.settings.resources as unused; carry them in the app.
+---
+ app/MotoActions/res/values/strings.xml        |  3 ++
+ .../settings/device/TouchKeyHandler.java      | 49 +++++++++++++++++--
+ 2 files changed, 49 insertions(+), 3 deletions(-)
+
+diff --git a/app/MotoActions/res/values/strings.xml b/app/MotoActions/res/values/strings.xml
+index 47d188b..54c65ca 100644
+--- a/app/MotoActions/res/values/strings.xml
++++ b/app/MotoActions/res/values/strings.xml
+@@ -40,4 +40,7 @@
+     <string name="tap_gesture_action_ambient_display">Show ambient display</string>
+     <string name="tap_gesture_action_wake_device">Wake device</string>
+ 
++    <!-- Removed from org.lineageos.settings.resources in LineageOS 24 as unused; text from lineage-23.2. -->
++    <string name="doze_settings_help_title">Help</string>
++    <string name="doze_settings_help_text">These features use sensor events to launch a doze notification pulse. The chosen sensor is only enabled when the device receives a notification, this helps to reduce battery usage. There is also an option to enable the chosen sensor as soon as the screen turns off, this will cause higher battery usage.</string>
+ </resources>
+diff --git a/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java b/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java
+index 17b997c..d74311e 100644
+--- a/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java
++++ b/app/MotoActions/src/org/lineageos/settings/device/TouchKeyHandler.java
+@@ -24,6 +24,10 @@ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.content.pm.PackageManager;
+ import android.content.pm.ResolveInfo;
++import android.hardware.Sensor;
++import android.hardware.SensorEvent;
++import android.hardware.SensorEventListener;
++import android.hardware.SensorManager;
+ import android.hardware.camera2.CameraAccessException;
+ import android.hardware.camera2.CameraCharacteristics;
+ import android.hardware.camera2.CameraManager;
+@@ -66,6 +70,8 @@ public class TouchKeyHandler implements DeviceKeyHandler {
+     private final EventHandler mEventHandler;
+     private final CameraManager mCameraManager;
+     private final Vibrator mVibrator;
++    private final SensorManager mSensorManager;
++    private final Sensor mProximitySensor;
+ 
+     private final SparseIntArray mActionMapping = new SparseIntArray();
+ 
+@@ -108,6 +114,16 @@ public class TouchKeyHandler implements DeviceKeyHandler {
+ 
+         mContext.registerReceiver(mUpdateReceiver,
+                 new IntentFilter(Constants.UPDATE_PREFS_ACTION));
++
++        mSensorManager = mContext.getSystemService(SensorManager.class);
++        mProximitySensor = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY, true);
++        if (mProximitySensor != null) {
++            final IntentFilter screenFilter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
++            screenFilter.addAction(Intent.ACTION_SCREEN_ON);
++            mContext.registerReceiver(mScreenStateReceiver, screenFilter);
++        } else {
++            Log.w(TAG, "No wake-up proximity sensor; tap gestures work in a pocket too");
++        }
+     }
+ 
+     private class TorchModeCallback extends CameraManager.TorchCallback {
+@@ -141,11 +157,38 @@ public class TouchKeyHandler implements DeviceKeyHandler {
+         return null;
+     }
+ 
+-    @Override
+-    public void onPocketStateChanged(boolean inPocket) {
++    private void onPocketStateChanged(boolean inPocket) {
+         mInPocket = inPocket;
+     }
+ 
++    // YAAP's framework reported the pocket state through a DeviceKeyHandler
++    // callback that LineageOS does not have. Track it here instead: listen to
++    // the (wake-up) proximity sensor only while the screen is off, so tap
++    // gestures stay ignored in a pocket without keeping the sensor on in use.
++    private final SensorEventListener mProximityListener = new SensorEventListener() {
++        @Override
++        public void onSensorChanged(SensorEvent event) {
++            onPocketStateChanged(event.values[0] < mProximitySensor.getMaximumRange());
++        }
++
++        @Override
++        public void onAccuracyChanged(Sensor sensor, int accuracy) {
++        }
++    };
++
++    private final BroadcastReceiver mScreenStateReceiver = new BroadcastReceiver() {
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
++                mSensorManager.registerListener(mProximityListener, mProximitySensor,
++                        SensorManager.SENSOR_DELAY_NORMAL, mEventHandler);
++            } else {
++                mSensorManager.unregisterListener(mProximityListener);
++                onPocketStateChanged(false);
++            }
++        }
++    };
++
+     private boolean hasSetupCompleted() {
+         return Settings.Secure.getInt(mContext.getContentResolver(),
+                 Settings.Secure.USER_SETUP_COMPLETE, 0) != 0;
+@@ -206,7 +249,7 @@ public class TouchKeyHandler implements DeviceKeyHandler {
+     }
+ 
+     private void launchCamera() {
+-        final Intent intent = new Intent(android.content.Intent.ACTION_SCREEN_CAMERA_GESTURE);
++        final Intent intent = new Intent(lineageos.content.Intent.ACTION_SCREEN_CAMERA_GESTURE);
+         mContext.sendBroadcastAsUser(intent, UserHandle.CURRENT,
+                 Manifest.permission.STATUS_BAR_SERVICE);
+         doHapticFeedback();
+-- 
+2.43.0
+

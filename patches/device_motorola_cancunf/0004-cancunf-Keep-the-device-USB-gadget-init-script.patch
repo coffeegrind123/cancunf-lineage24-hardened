@@ -1,0 +1,28 @@
+From 39b0314716862b05879e3f9eee67bc1fb5c30aa3 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 22:52:43 +0000
+Subject: [PATCH] cancunf: Keep the device USB gadget init script
+
+LineageOS 24 hardware/mediatek generates init.<platform>.usb.rc from a
+shared script, which collides with ours in two namespaces. Our copy
+matches stock and uses mass_storage.0, which the updated gadget HAL
+links, so opt out of the shared one.
+---
+ device.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.mk b/device.mk
+index 72d4211..fc13851 100644
+--- a/device.mk
++++ b/device.mk
+@@ -423,6 +423,7 @@ PRODUCT_PACKAGES += \
+ 
+ # USB
+ $(call soong_config_set_bool,android_hardware_mediatek_usb,audio_accessory_supported,true)
++$(call soong_config_set_bool,mediatek_gadget,use_custom_usb_gadget_rc,true)
+ 
+ PRODUCT_PACKAGES += \
+     android.hardware.usb-service.mediatek \
+-- 
+2.43.0
+

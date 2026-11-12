@@ -1,0 +1,27 @@
+From 12917dcca86fe76cc1e9d1c7dd99253218989672 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 22:42:39 +0000
+Subject: [PATCH] cancunf: Drop the hardware/mediatek/libaedv namespace
+ import
+
+It is no longer a namespace in LineageOS 24 hardware/mediatek; libaedv
+and libladder resolve through the hardware/mediatek import.
+---
+ Android.bp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/Android.bp b/Android.bp
+index 71adc20..1fe5439 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -6,7 +6,6 @@ soong_namespace {
+     imports: [
+         "device/motorola/cancunf",
+         "hardware/mediatek",
+-        "hardware/mediatek/libaedv",
+         "hardware/mediatek/libmtkperf_client",
+     ],
+ }
+-- 
+2.43.0
+

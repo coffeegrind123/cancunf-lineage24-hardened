@@ -1,0 +1,28 @@
+From a0f800f0856bd791afdc0936d8323d13f512a7b9 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 10:32:09 +0000
+Subject: [PATCH] cancunf: Export the power-libperfmgr Soong namespace
+
+hardware/google/pixel/power-libperfmgr became its own Soong namespace,
+so its power HAL is hidden from Make and Kati fails with the module
+missing from PRODUCT_PACKAGES. Export it, as other LineageOS 24
+devices do.
+---
+ device.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.mk b/device.mk
+index 7a44165..508b714 100644
+--- a/device.mk
++++ b/device.mk
+@@ -405,6 +405,7 @@ PRODUCT_COPY_FILES += \
+ PRODUCT_SOONG_NAMESPACES += \
+     hardware/google/interfaces \
+     hardware/google/pixel \
++    hardware/google/pixel/power-libperfmgr \
+     hardware/mediatek \
+     hardware/mediatek/libmtkperf_client \
+     hardware/mediatek/wlan/wifi_hal \
+-- 
+2.43.0
+

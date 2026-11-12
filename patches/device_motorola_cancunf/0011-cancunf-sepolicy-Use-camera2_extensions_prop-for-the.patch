@@ -1,0 +1,51 @@
+From c3cd986939bf13e85b50e3fa22b0938131855279 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 20:20:15 +0000
+Subject: [PATCH] cancunf: sepolicy: Use camera2_extensions_prop for the
+ camera app list
+
+persist.vendor.camera.privapp.list was labelled vendor_persist_camera_prop,
+a type YAAP got from device/qcom/sepolicy, which LineageOS includes only
+on Qualcomm devices. LineageOS common sepolicy already labels the
+property camera2_extensions_prop (an AOSP public type) and lets
+cameraserver read it. Drop our label and cameraserver rule, and let the
+MediaTek camera HAL domain read the LineageOS label.
+---
+ sepolicy/vendor/cameraserver.te   | 1 -
+ sepolicy/vendor/mtk_hal_camera.te | 2 +-
+ sepolicy/vendor/property_contexts | 1 -
+ 3 files changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/sepolicy/vendor/cameraserver.te b/sepolicy/vendor/cameraserver.te
+index 55f9f37..ec3811f 100644
+--- a/sepolicy/vendor/cameraserver.te
++++ b/sepolicy/vendor/cameraserver.te
+@@ -1,2 +1 @@
+-get_prop(cameraserver, vendor_persist_camera_prop)
+ allow cameraserver flashlight_device:chr_file rw_file_perms;
+diff --git a/sepolicy/vendor/mtk_hal_camera.te b/sepolicy/vendor/mtk_hal_camera.te
+index 8e3042e..87e8335 100644
+--- a/sepolicy/vendor/mtk_hal_camera.te
++++ b/sepolicy/vendor/mtk_hal_camera.te
+@@ -10,7 +10,7 @@ allow mtk_hal_camera vendor_imager_metadata_file:file rw_file_perms;
+ allow mtk_hal_camera vendor_imager_metadata_file:file { create setattr };
+ get_prop(mtk_hal_camera, system_mot_camera_prop)
+ get_prop(mtk_hal_camera, vendor_mot_prop)
+-get_prop(mtk_hal_camera, vendor_persist_camera_prop)
++get_prop(mtk_hal_camera, camera2_extensions_prop)
+ r_dir_file(mtk_hal_camera, persist_data_file)
+ r_dir_file(mtk_hal_camera, sysfs_therm)
+ rw_dir_file(mtk_hal_camera, vendor_persist_camera_file)
+diff --git a/sepolicy/vendor/property_contexts b/sepolicy/vendor/property_contexts
+index c2ae4f0..030b04f 100644
+--- a/sepolicy/vendor/property_contexts
++++ b/sepolicy/vendor/property_contexts
+@@ -1,5 +1,4 @@
+ # Camera
+-persist.vendor.camera.privapp.list  u:object_r:vendor_persist_camera_prop:s0
+ vendor.mot_ota_tuning.valid      u:object_r:vendor_mot_camera_prop:s0
+ 
+ # FPS
+-- 
+2.43.0
+

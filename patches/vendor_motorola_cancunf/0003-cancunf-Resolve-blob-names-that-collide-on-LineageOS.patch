@@ -1,0 +1,177 @@
+From a9e18e5e944f2eea0981c6040ab509efae679fd8 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 10 Nov 2026 23:11:51 +0000
+Subject: [PATCH] cancunf: Resolve blob names that collide on LineageOS 24
+
+Matches the device tree: libformatter becomes libformatter_mtk, and the
+libladder and wlan_assistant blobs give way to hardware/mediatek builds.
+
+The blob removals, rename and patchelf edits are applied by
+build/apply-patches.sh, because this repo carries no proprietary files.
+---
+ Android.bp        | 76 +++--------------------------------------------
+ cancunf-vendor.mk |  5 +---
+ 2 files changed, 5 insertions(+), 76 deletions(-)
+
+diff --git a/Android.bp b/Android.bp
+index fc2a6ad..7a553a4 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -26170,47 +26170,6 @@ cc_prebuilt_library_shared {
+     soc_specific: true,
+ }
+ 
+-cc_prebuilt_library_shared {
+-    name: "libladder",
+-    owner: "motorola",
+-    strip: {
+-        none: true,
+-    },
+-    target: {
+-        android_arm: {
+-            srcs: [
+-                "proprietary/vendor/lib/libladder.so",
+-            ],
+-            shared_libs: [
+-                "libunwindstack",
+-                "liblog",
+-                "libbase",
+-                "libc++",
+-                "libc",
+-                "libm",
+-                "libdl",
+-            ],
+-        },
+-        android_arm64: {
+-            srcs: [
+-                "proprietary/vendor/lib64/libladder.so",
+-            ],
+-            shared_libs: [
+-                "libunwindstack",
+-                "liblog",
+-                "libbase",
+-                "libc++",
+-                "libc",
+-                "libm",
+-                "libdl",
+-            ],
+-        },
+-    },
+-    compile_multilib: "both",
+-    prefer: true,
+-    soc_specific: true,
+-}
+-
+ cc_prebuilt_library_shared {
+     name: "liblog_vendor",
+     owner: "motorola",
+@@ -38577,7 +38536,7 @@ cc_prebuilt_library_shared {
+                 "proprietary/vendor/lib64/libcodec2_mtk_vdec.so",
+             ],
+             shared_libs: [
+-                "libformatter",
++                "libformatter_mtk",
+                 "libdpframework",
+                 "android.hardware.graphics.bufferqueue@2.0",
+                 "libui",
+@@ -38626,7 +38585,7 @@ cc_prebuilt_library_shared {
+                 "proprietary/vendor/lib64/libcodec2_mtk_venc.so",
+             ],
+             shared_libs: [
+-                "libformatter",
++                "libformatter_mtk",
+                 "libdpframework",
+                 "android.hardware.graphics.bufferqueue@2.0",
+                 "libui",
+@@ -38916,7 +38875,7 @@ cc_prebuilt_library_shared {
+ }
+ 
+ cc_prebuilt_library_shared {
+-    name: "libformatter",
++    name: "libformatter_mtk",
+     owner: "motorola",
+     strip: {
+         none: true,
+@@ -38924,7 +38883,7 @@ cc_prebuilt_library_shared {
+     target: {
+         android_arm64: {
+             srcs: [
+-                "proprietary/vendor/lib64/libformatter.so",
++                "proprietary/vendor/lib64/libformatter_mtk.so",
+             ],
+             shared_libs: [
+                 "libion_mtk",
+@@ -52469,33 +52428,6 @@ cc_prebuilt_binary {
+     soc_specific: true,
+ }
+ 
+-cc_prebuilt_binary {
+-    name: "wlan_assistant",
+-    owner: "motorola",
+-    target: {
+-        android_arm64: {
+-            srcs: [
+-                "proprietary/vendor/bin/wlan_assistant",
+-            ],
+-            shared_libs: [
+-                "libc",
+-                "liblog",
+-                "libcutils",
+-                "libnl",
+-                "libc++",
+-                "libm",
+-                "libdl",
+-            ],
+-        },
+-    },
+-    compile_multilib: "64",
+-    strip: {
+-        none: true,
+-    },
+-    prefer: true,
+-    soc_specific: true,
+-}
+-
+ cc_prebuilt_binary {
+     name: "wmt_launcher",
+     owner: "motorola",
+diff --git a/cancunf-vendor.mk b/cancunf-vendor.mk
+index d89a040..1164b42 100644
+--- a/cancunf-vendor.mk
++++ b/cancunf-vendor.mk
+@@ -273,7 +273,6 @@ PRODUCT_COPY_FILES += \
+     vendor/motorola/cancunf/proprietary/vendor/etc/init/vendor.mmi.cxp.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/vendor.mmi.cxp.rc \
+     vendor/motorola/cancunf/proprietary/vendor/etc/init/vendor.trustonic.tee@1.1-service.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/vendor.trustonic.tee@1.1-service.rc \
+     vendor/motorola/cancunf/proprietary/vendor/etc/init/volte_clientapi_ua.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/volte_clientapi_ua.rc \
+-    vendor/motorola/cancunf/proprietary/vendor/etc/init/wlan_assistant.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/wlan_assistant.rc \
+     vendor/motorola/cancunf/proprietary/vendor/etc/libese-nxp.conf:$(TARGET_COPY_OUT_VENDOR)/etc/libese-nxp.conf \
+     vendor/motorola/cancunf/proprietary/vendor/etc/libnfc-nci.conf:$(TARGET_COPY_OUT_VENDOR)/etc/libnfc-nci.conf \
+     vendor/motorola/cancunf/proprietary/vendor/etc/libnfc-nci_100.conf:$(TARGET_COPY_OUT_VENDOR)/etc/libnfc-nci_100.conf \
+@@ -1073,7 +1072,6 @@ PRODUCT_PACKAGES += \
+     libispcameraca \
+     libjpeg-alpha-oal_vendor \
+     libjpeg-alpha_vendor \
+-    libladder \
+     liblog_vendor \
+     libminiui \
+     libmml \
+@@ -1373,7 +1371,7 @@ PRODUCT_PACKAGES += \
+     libfft_vendor \
+     libfgauge_gm30 \
+     libforkexecwrap \
+-    libformatter \
++    libformatter_mtk \
+     libfp_ext_svc2 \
+     libgf_ca \
+     libgf_hal \
+@@ -1791,7 +1789,6 @@ PRODUCT_PACKAGES += \
+     volte_rcs_ua \
+     wifi_dump \
+     wifitest \
+-    wlan_assistant \
+     wmt_launcher \
+     wmt_loader \
+     vtservice
+-- 
+2.43.0
+
