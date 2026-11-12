@@ -20,7 +20,8 @@ IMAGE=${IMAGE:-lineage-build:24}
 if docker run --rm alpine grep -q 'zram0 ' /proc/swaps 2>/dev/null; then
     # zram is the only swap: give the build most of it, keep RAM for the VM.
     MEM=${MEM:-8g}
-    MEMSWAP=${MEMSWAP:-48g}
+    # RAM + swap; the 36 GiB swap share stays below the VM's 40 GiB zram (peak use 26 GB).
+    MEMSWAP=${MEMSWAP:-44g}
     GOGC=${GOGC:-30}      # trade GC CPU for a smaller heap; every page of it is swapped
     # siso holds ~5 GB of the 8 GiB, and every javac gets a 4 GB heap. At -j10
     # the Java-heavy part of the build thrashed (57% full stall for an hour,
