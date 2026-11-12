@@ -87,7 +87,9 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 
 0. **Build host:** done. See [04-build-host.md](04-build-host.md).
 1. **Plain LineageOS 24 cancunf:**
-   - product makefile, build, flash
+   - product makefile and build: **done 2026-11-12.** Fourteen device patches, three vendor and one DisplayFeatures patch were needed ([04-build-host.md](04-build-host.md#our-changes-to-synced-trees)).
+   - release keys and a release-signed OTA: done ([07-maintenance.md](07-maintenance.md#release-keys))
+   - flash: next. The first install moves the phone to Android 15 firmware (`V1TDS35H.83-20-5-11`), which the owner approved.
    - check the hardware matrix and IMS service startup
    - restore path: [01-backup.md](01-backup.md)
 2. **GmsCompat port** plus sandboxed Play.

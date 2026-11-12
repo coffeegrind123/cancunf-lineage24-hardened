@@ -7,8 +7,9 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Full stock backup, both slots, all partitions except userdata | done, hash-verified, factory `boot_a` proven against signed vbmeta |
 | Restore tooling (fastboot set + root-only per-device partitions) | done; `boot_a` restore used for real |
 | Bootloader unlock + temporary root (Magisk v27.0) | done; v28+ is refused by this bootloader, see [docs/03-root.md](docs/03-root.md) |
-| Build host on Windows/WSL2 with a hard memory cap | done |
-| Plain LineageOS 24 for cancunf | prepared: source synced (136 GB), `lineage_cancunf` product written, IMS app verified patched; build awaiting go-ahead |
+| Build host on Windows/WSL2 with a hard memory cap | done; Android 17 analysis runs with zram, see [docs/04-build-host.md](docs/04-build-host.md) |
+| Plain LineageOS 24 for cancunf | built 2026-11-12 and release-signed (1.68 GB OTA); not flashed yet. Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
+| Release keys and signing | done: [`build/keys.sh`](build/keys.sh), [`build/sign.sh`](build/sign.sh); keys stay on the build disk |
 | GrapheneOS GmsCompat (sandboxed Google Play) | planned (phase 2) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
 | Root-free Play Integrity support | planned (phase 4) |
@@ -38,6 +39,9 @@ scripts/restore/restore-fastboot.ps1 Windows: verified fastboot restore of the f
 scripts/restore/device-restore.sh    on-phone (root): restore nvdata/persist/... with readback verification
 scripts/windows/*.ps1                fastboot GUID fix, build-disk creation and re-attach
 build/                               Dockerfile, local manifest, sync, survey and capped build scripts
+build/zram.sh                        compressed RAM swap for the VM, which Android 17's analysis needs
+build/keys.sh, build/sign.sh         release keys (on the build disk only) and release signing
+build/soong-prune.py                 generates the device's Soong prune list
 patches/<project>/                   our commits on top of the synced trees (build/apply-patches.sh)
 ```
 

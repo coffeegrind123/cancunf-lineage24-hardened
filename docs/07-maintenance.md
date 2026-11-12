@@ -35,8 +35,17 @@ OTA updates only work if every release is signed with the **same keys** as the i
 - the AVB key
 - the `gmscompat_lib` key
 
-- Generate them once, before the first build meant for daily use, with `development/tools/make_key` plus `avbtool` for AVB.
+- **Generated 2026-11-12** with [`build/keys.sh`](../build/keys.sh). It writes `development/tools/make_key` certificates (bluetooth, cyngn-app, media, networkstack, nfc, platform, releasekey, sdk_sandbox, shared, testcert, testkey, verity, gmscompat_lib), one RSA-4096 key per APEX in the build, and an RSA-4096 AVB key with its `avb_pkmd.bin`. The certificate subject carries the project name only. Re-running it never overwrites a key; it only adds keys for new APEXes.
 - **Never commit them.** They live on the build disk (`/lin/keys`, mode 700), with an offline encrypted backup kept by the owner.
+- [`build/sign.sh`](../build/sign.sh) re-signs a finished build without recompiling. It writes three files to `/lin/release/<build id>/`: the signed target files (kept, because incrementals need them), the release OTA and the fastboot images.
+  - Verified on the first release:
+    - Settings is on our platform key, Etar and Launcher on releasekey, Dialer on shared.
+    - APEX containers and payloads are on their own keys.
+    - `vbmeta`/`vbmeta_system` are signed with our AVB key (SHA256_RSA4096).
+    - `otacerts.zip` holds only our releasekey.
+    - The build tags read `release-keys`.
+  - `META/apkcerts.txt` and `META/apexkeys.txt` are copied through unchanged, so check real signatures, not those files.
+- Motorola's bootloader does not take a custom AVB key, so the bootloader stays unlocked and AVB does not enforce our key. Signing with it still keeps `vbmeta` consistent across our releases.
 - **Losing them** means the installed phone can't take our updates and needs a clean flash with userdata wiped.
 - **Leaking them** means someone else can sign updates the phone will accept.
 - Development builds use test keys and are never published as OTAs.
@@ -58,7 +67,12 @@ Run by the agent, after the owner approves the build:
    - New hardening: judge each one against this hardware (Pixel-only changes are skipped).
    - If GrapheneOS rebased onto a new AOSP tag (`android-17.0.0_rN`), re-check the base with the same `ls-remote` method used in the survey.
    - Update `ported.json` with the new heads.
-5. **Build.** Run `build/build.sh` with the target-files and OTA targets, then sign the target-files with the release keys.
+5. **Build and sign.**
+   - `build/zram.sh on`
+   - `build/build.sh` (the default target, `bacon`)
+   - `TARGET=target-files-package build/build.sh`
+   - `build/sign.sh`
+   - Test-keys output is for development only.
 6. **Make the packages:**
    - a full OTA
    - incrementals from the previous published releases. Keep every published `target_files.zip` on the build disk, because an incremental needs the old one.
@@ -71,9 +85,9 @@ Run by the agent, after the owner approves the build:
 ## OTA delivery from GitHub
 
 **Hosting.** Updates are GitHub release assets on this repo.
-- GitHub limits each release file to under 2 GiB. **A full cancunf OTA will not fit:** PixelOS's comparable full zip is 2.81 GB (`PixelOS_cancunf-16.2-20260609-0618.zip`).
-- So full OTAs need other hosting (PixelOS uses its own server plus SourceForge). The metadata and incrementals can stay on GitHub releases, with the full package's URL pointing at that host.
-- Measure our sizes on the first build, then pick the host.
+- GitHub limits each release file to under 2 GiB. PixelOS's comparable full zip is 2.81 GB (`PixelOS_cancunf-16.2-20260609-0618.zip`), which raised the question of whether ours would fit.
+- **Measured on our first release: the signed full OTA is 1.68 GB** (1,680,937,359 bytes), under the limit. It fits as a GitHub release asset as it stands. Growth from GmsCompat, Pixel assets and preloads (phases 2, 7, 10) could push it over; check each release, and move full packages to other hosting only if one crosses 2 GiB.
+- The fastboot images zip is 2.37 GB, over the limit. It is only needed for a first install and is not published.
 
 **Updater on the phone: the GrapheneOS Updater**
 ([GrapheneOS/platform_packages_apps_Updater](https://github.com/GrapheneOS/platform_packages_apps_Updater), MIT, branch `17`)
