@@ -1,0 +1,27 @@
+From 9693bbbf56c475fbfd8fd418733d1e03826b1442 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Thu, 12 Nov 2026 10:31:06 +0000
+Subject: [PATCH] cancunf: Set FCM level to 7
+
+Android 17 no longer ships a framework compatibility matrix for FCM
+level 6, so the OTA's VINTF check fails with "Cannot find framework
+matrix at FCM version 6". The device ships with API level 33 (FCM 7),
+and checkvintf passes against the built target files at level 7. Same
+change LineageOS made for earth on lineage-24.0.
+---
+ configs/vintf/manifest.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configs/vintf/manifest.xml b/configs/vintf/manifest.xml
+index d238fbd..a552c3f 100644
+--- a/configs/vintf/manifest.xml
++++ b/configs/vintf/manifest.xml
+@@ -1,4 +1,4 @@
+-<manifest version="8.0" type="device" target-level="6">
++<manifest version="8.0" type="device" target-level="7">
+     <hal format="hidl">
+         <name>android.hardware.audio</name>
+         <transport>hwbinder</transport>
+-- 
+2.43.0
+
