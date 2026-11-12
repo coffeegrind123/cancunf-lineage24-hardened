@@ -1,0 +1,126 @@
+From 12f15f7806dc5653d16cae94b2e8f69c666dcf19 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Wed, 11 Nov 2026 19:09:13 +0000
+Subject: [PATCH] DisplayFeatures: Define the DC dim schedule keys locally
+
+Settings.Secure.DC_DIM_AUTO_MODE and DC_DIM_AUTO_TIME exist only in
+YAAP frameworks, so the app does not build on LineageOS. Keep the same
+key strings in the app. The schedule screen only appears when the device
+overlay names a DC dimming node; acting on the schedule needs YAAP's
+AutoDCDimService.
+---
+ .../display/DcDimSettings.java                | 31 +++++++++++++++++++
+ .../DisplayFeaturesDcDimScheduleActivity.java | 14 ++++-----
+ .../display/DisplayFeaturesFragment.java      | 12 +++----
+ 3 files changed, 44 insertions(+), 13 deletions(-)
+ create mode 100644 src/com/android/displayfeatures/display/DcDimSettings.java
+
+diff --git a/src/com/android/displayfeatures/display/DcDimSettings.java b/src/com/android/displayfeatures/display/DcDimSettings.java
+new file mode 100644
+index 0000000..91dbd93
+--- /dev/null
++++ b/src/com/android/displayfeatures/display/DcDimSettings.java
+@@ -0,0 +1,31 @@
++/*
++ * SPDX-FileCopyrightText: The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package com.android.displayfeatures.display;
++
++/**
++ * Secure-settings keys of the DC dimming schedule.
++ *
++ * YAAP defines these in its framework, where AutoDCDimService acts on them.
++ * Neither exists on LineageOS. The keys are kept so the schedule screen
++ * builds; it is only shown when config_DisplayFeaturesDcDimPath names an
++ * existing node, and acting on the schedule needs that service ported.
++ */
++final class DcDimSettings {
++    /** One of the MODE_* values below. */
++    static final String DC_DIM_AUTO_MODE = "dc_dim_auto_mode";
++
++    /** Custom window as "HH:mm,HH:mm" (since,till); used for modes 2 to 4. */
++    static final String DC_DIM_AUTO_TIME = "dc_dim_auto_time";
++
++    // Values of DC_DIM_AUTO_MODE, as YAAP AutoSettingConsts defines them.
++    static final int MODE_DISABLED = 0;
++    static final int MODE_NIGHT = 1;          // sunset to sunrise
++    static final int MODE_TIME = 2;           // custom window
++    static final int MODE_MIXED_SUNSET = 3;   // sunset till a time
++    static final int MODE_MIXED_SUNRISE = 4;  // a time till sunrise
++
++    private DcDimSettings() {}
++}
+diff --git a/src/com/android/displayfeatures/display/DisplayFeaturesDcDimScheduleActivity.java b/src/com/android/displayfeatures/display/DisplayFeaturesDcDimScheduleActivity.java
+index f2959c4..2fb72cf 100644
+--- a/src/com/android/displayfeatures/display/DisplayFeaturesDcDimScheduleActivity.java
++++ b/src/com/android/displayfeatures/display/DisplayFeaturesDcDimScheduleActivity.java
+@@ -15,11 +15,11 @@
+  */
+ package com.android.displayfeatures.display;
+ 
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_DISABLED;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_NIGHT;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_TIME;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_MIXED_SUNSET;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_MIXED_SUNRISE;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_DISABLED;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_NIGHT;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_TIME;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_MIXED_SUNSET;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_MIXED_SUNRISE;
+ 
+ import android.app.Fragment;
+ import android.app.TimePickerDialog;
+@@ -140,7 +140,7 @@ public class DisplayFeaturesDcDimScheduleActivity extends CollapsingToolbarBaseA
+ 
+         private String[] getCustomTimeSetting() {
+             String value = Settings.Secure.getStringForUser(getActivity().getContentResolver(),
+-                    Settings.Secure.DC_DIM_AUTO_TIME, UserHandle.USER_CURRENT);
++                    DcDimSettings.DC_DIM_AUTO_TIME, UserHandle.USER_CURRENT);
+             if (value == null || value.equals("")) value = "20:00,07:00";
+             return value.split(",", 0);
+         }
+@@ -195,7 +195,7 @@ public class DisplayFeaturesDcDimScheduleActivity extends CollapsingToolbarBaseA
+             nMinute += String.valueOf(minute);
+             times[since ? 0 : 1] = nHour + ":" + nMinute;
+             Settings.Secure.putStringForUser(getActivity().getContentResolver(),
+-                    Settings.Secure.DC_DIM_AUTO_TIME,
++                    DcDimSettings.DC_DIM_AUTO_TIME,
+                     times[0] + "," + times[1], UserHandle.USER_CURRENT);
+             updateTimeSummary(times, Integer.parseInt(mModePref.getValue()));
+         }
+diff --git a/src/com/android/displayfeatures/display/DisplayFeaturesFragment.java b/src/com/android/displayfeatures/display/DisplayFeaturesFragment.java
+index cc63492..49c294c 100644
+--- a/src/com/android/displayfeatures/display/DisplayFeaturesFragment.java
++++ b/src/com/android/displayfeatures/display/DisplayFeaturesFragment.java
+@@ -17,11 +17,11 @@
+ 
+ package com.android.displayfeatures.display;
+ 
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_DISABLED;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_NIGHT;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_TIME;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_MIXED_SUNSET;
+-import static com.android.internal.util.yaap.AutoSettingConsts.MODE_MIXED_SUNRISE;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_DISABLED;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_NIGHT;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_TIME;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_MIXED_SUNSET;
++import static com.android.displayfeatures.display.DcDimSettings.MODE_MIXED_SUNRISE;
+ 
+ import android.content.BroadcastReceiver;
+ import android.content.Context;
+@@ -261,7 +261,7 @@ public class DisplayFeaturesFragment extends SettingsBasePreferenceFragment impl
+     private void updateDcDimmingScheduleSummary() {
+         if (mDcDimmingSchedulePreference == null) return;
+         int mode = Settings.Secure.getIntForUser(getActivity().getContentResolver(),
+-                Settings.Secure.DC_DIM_AUTO_MODE, 0, UserHandle.USER_CURRENT);
++                DcDimSettings.DC_DIM_AUTO_MODE, 0, UserHandle.USER_CURRENT);
+         switch (mode) {
+             default:
+             case MODE_DISABLED:
+-- 
+2.43.0
+
