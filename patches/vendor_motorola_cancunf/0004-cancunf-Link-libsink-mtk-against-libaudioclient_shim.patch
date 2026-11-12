@@ -1,0 +1,27 @@
+From f84f2cb9563674c2fe2f919911bc1c8b548aabb7 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Thu, 12 Nov 2026 11:05:19 +0000
+Subject: [PATCH] cancunf: Link libsink-mtk against libaudioclient_shim
+
+Matches the device tree: the blob gains libaudioclient_shim.so as a
+needed library (added by build/apply-patches.sh with patchelf), so the
+ELF check resolves the old AudioTrack constructor.
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 7a553a4..53dd163 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -50263,6 +50263,7 @@ cc_prebuilt_library_shared {
+                 "liblog",
+                 "libmedia_omx",
+                 "libaudioclient",
++                "libaudioclient_shim",
+                 "libc++",
+                 "libc",
+                 "libm",
+-- 
+2.43.0
+

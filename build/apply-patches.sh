@@ -43,6 +43,10 @@ blobfix_vendor_motorola_cancunf() {
     for lib in libcodec2_mtk_vdec libcodec2_mtk_venc; do
         "$PATCHELF" --replace-needed libformatter.so libformatter_mtk.so "$p/lib64/$lib.so"
     done
+    # libsink-mtk needs the old AudioTrack constructor: device patch 0014.
+    "$PATCHELF" --add-needed libaudioclient_shim.so proprietary/system_ext/lib64/libsink-mtk.so
+    git add proprietary/system_ext/lib64/libsink-mtk.so
+
     git rm -q "$p/lib/libladder.so" "$p/lib64/libladder.so" \
         "$p/bin/wlan_assistant" "$p/etc/init/wlan_assistant.rc"
 

@@ -1,0 +1,29 @@
+From 2a8aa225ddcf766854de4e177f0094fbd36a2c11 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Thu, 12 Nov 2026 11:05:18 +0000
+Subject: [PATCH] cancunf: Shim AudioTrack for libsink-mtk
+
+The IMS video-call sink blob was built against an older libaudioclient
+and needs an AudioTrack constructor Android 17 no longer has, so its
+ELF check fails. Add LineageOS's libaudioclient_shim as a needed
+library, as earth and mt6768-common do.
+---
+ extract-files.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/extract-files.py b/extract-files.py
+index 1fad7d5..2b969b1 100755
+--- a/extract-files.py
++++ b/extract-files.py
+@@ -102,6 +102,8 @@ blob_fixups: blob_fixups_user_type = {
+         'vendor/lib64/libcodec2_mtk_venc.so',
+     ): blob_fixup()
+         .replace_needed('libformatter.so', 'libformatter_mtk.so'),
++    'system_ext/lib64/libsink-mtk.so': blob_fixup()
++        .add_needed('libaudioclient_shim.so'),
+     'vendor/lib64/mt6855/libmnl_mtk.so': blob_fixup()
+         .add_needed('libcutils.so'),
+     'vendor/etc/vintf/manifest/manifest_media_c2_V1_2_default.xml': blob_fixup()
+-- 
+2.43.0
+
