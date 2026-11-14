@@ -93,3 +93,32 @@ This was the only `CANNOT LINK` in two full boots. The other `dlopen` misses in 
 Fix: export `hardware/google/pixel/pixelstats` (device patch 0015), rebuild, and check that `/vendor/lib64/pixelatoms-cpp.so` is in the image before installing.
 
 **Confirmed 2026-11-14:** with patch 0015, `/vendor/lib64/pixelatoms-cpp.so` is in the image, an image-wide scan of `NEEDED` entries finds no other missing library, and release build `1794655118` boots to the setup wizard and into the OS.
+
+## First boot: hardware check over adb (no SIM)
+
+Release build `1794655118`, read-only checks with `dumpsys`/`getprop` a few minutes after setup (2026-11-14):
+
+| Area | Result |
+|---|---|
+| Boot health | `sys.boot_completed=1`; crash buffer empty; no `CANNOT LINK` anywhere in the log |
+| Thermal HAL | `ThermalHAL AIDL 3 connected: yes`, reporting real temperatures |
+| Sensors | 39 hardware sensors, all running, including Moto's (CapSense, Stowed, ChopChop, dt-gesture) |
+| Cameras | 3 devices (2 back, 1 front) |
+| Wi-Fi | enabled, `wlan0` up |
+| Bluetooth | controller up at boot (real address read), 0 crashes; then switched off from quick settings |
+| Fingerprint | HAL present (`FingerprintProvider/defaultHIDL`), nothing enrolled |
+| GNSS | MediaTek `mnld` running (`MTK_MNLD_default`) |
+| Audio | audioserver running, four mixer output streams |
+| NFC | on |
+| Vibrator | present |
+| Battery and charging | charging over USB, health good |
+| Modem | baseband loaded on both slots, `ccci_mdinit` running, `OUT_OF_SERVICE` (no SIM) |
+| IMS | `com.mediatek.ims` plus the `mtkIms` and `telephony_ims` services present; registration needs a SIM |
+
+Found, not yet fixed:
+
+- `mtk_secure_element_hal_service` restarts every 5 s: `android.hardware.secure_element@1.2::ISecureElement/SIM1` is missing from the device VINTF manifest, so registration is refused. That affects only UICC secure elements (SIM-based payments, some eSIM functions). Fix: declare the `SIM1`/`SIM2` instances.
+- SELinux denials, none of which stops a service: Moto's vendor init scripts (block devices, sysfs, vendor props), `system_suspend` reading battery sysfs, and `vendor_init` setting MTK props.
+- Optional `dlopen` misses from the bootloop logs (camera tuning libraries, `sounddose`) still need checking with real use: take photos, play audio.
+
+Not checkable without interaction: photo and video capture, playback and calls, fingerprint enrolment, a GPS fix, Wi-Fi and Bluetooth connections, and SIM features.
