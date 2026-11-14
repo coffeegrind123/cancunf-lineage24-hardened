@@ -8,7 +8,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Restore tooling (fastboot set + root-only per-device partitions) | done; `boot_a` restore used for real |
 | Bootloader unlock + temporary root (Magisk v27.0) | done; v28+ is refused by this bootloader, see [docs/03-root.md](docs/03-root.md) |
 | Build host on Windows/WSL2 with a hard memory cap | done; Android 17 analysis runs with zram, see [docs/04-build-host.md](docs/04-build-host.md) |
-| Plain LineageOS 24 for cancunf | built and release-signed 2026-11-12; installed, then bootlooped: the thermal HAL is missing `pixelatoms-cpp.so` and system_server's watchdog kills it. Fix being built. See [docs/09-first-install.md](docs/09-first-install.md). Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
+| Plain LineageOS 24 for cancunf | boots: build `1794655118` (2026-11-14, release-signed) installed from SD card and through setup. The first build bootlooped on a missing thermal-HAL library, fixed by device patch 0015; see [docs/09-first-install.md](docs/09-first-install.md). Hardware matrix next. Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
 | Release keys and signing | done: [`build/keys.sh`](build/keys.sh), [`build/sign.sh`](build/sign.sh); keys stay on the build disk |
 | GrapheneOS GmsCompat (sandboxed Google Play) | planned (phase 2) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |

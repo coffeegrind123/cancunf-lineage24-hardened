@@ -91,3 +91,5 @@ The HAL is built from `hardware/mediatek/aidl/thermal` and links `pixelatoms-cpp
 This was the only `CANNOT LINK` in two full boots. The other `dlopen` misses in the log are optional plugins: per-sensor camera tuning libraries, `android.hardware.audio.sounddose-vendor-impl.so`, Qualcomm's `libcdsprpc.so` and MTK tool libraries. They are left for the hardware matrix in phase 1.
 
 Fix: export `hardware/google/pixel/pixelstats` (device patch 0015), rebuild, and check that `/vendor/lib64/pixelatoms-cpp.so` is in the image before installing.
+
+**Confirmed 2026-11-14:** with patch 0015, `/vendor/lib64/pixelatoms-cpp.so` is in the image, an image-wide scan of `NEEDED` entries finds no other missing library, and release build `1794655118` boots to the setup wizard and into the OS.
