@@ -1,0 +1,180 @@
+From 744ef9bcd8ed8f39dc5320029f1bd51a45b0557b Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sat, 14 Nov 2026 16:31:45 +0000
+Subject: [PATCH] cancunf: Pad large allocations in the camera HAL
+
+Motorola's ArcSoft low-light library reads past the end of large
+buffers; with Scudo's guard pages that crashes camerahalserver
+(SEGV_ACCERR, "possible buffer overflow accessing after secondary
+allocation"). Preload a small library into camerahalserver only that
+adds 4 KiB of slack to allocations of 64 KiB or more, so the overread
+stays inside the allocation.
+---
+ camera/camhal_pad/Android.bp   | 10 ++++
+ camera/camhal_pad/camhal_pad.c | 86 ++++++++++++++++++++++++++++++++++
+ device.mk                      |  4 +-
+ init/Android.bp                |  7 +++
+ init/camerahalserver_pad.rc    | 11 +++++
+ 5 files changed, 117 insertions(+), 1 deletion(-)
+ create mode 100644 camera/camhal_pad/Android.bp
+ create mode 100644 camera/camhal_pad/camhal_pad.c
+ create mode 100644 init/camerahalserver_pad.rc
+
+diff --git a/camera/camhal_pad/Android.bp b/camera/camhal_pad/Android.bp
+new file mode 100644
+index 0000000..31b6e54
+--- /dev/null
++++ b/camera/camhal_pad/Android.bp
+@@ -0,0 +1,10 @@
++cc_library_shared {
++    name: "libcamhal_pad",
++    vendor: true,
++    srcs: ["camhal_pad.c"],
++    shared_libs: ["libdl"],
++    cflags: [
++        "-Wall",
++        "-Werror",
++    ],
++}
+diff --git a/camera/camhal_pad/camhal_pad.c b/camera/camhal_pad/camhal_pad.c
+new file mode 100644
+index 0000000..d0d7b65
+--- /dev/null
++++ b/camera/camhal_pad/camhal_pad.c
+@@ -0,0 +1,86 @@
++/*
++ * Pads large heap allocations in camerahalserver.
++ *
++ * Motorola's ArcSoft low-light library (libarcsoft_portrait_super_night_se_raw_lite.so)
++ * reads a few bytes past the end of large buffers. Scudo places a guard page
++ * right after large ("secondary") allocations, so the overread crashes the
++ * camera HAL with SEGV_ACCERR ("possible buffer overflow accessing after
++ * secondary allocation"). The blob cannot be fixed, so this library, preloaded
++ * into camerahalserver only, adds PAD_BYTES of slack to every allocation of at
++ * least PAD_MIN_SIZE bytes. Small allocations, free() and every other process
++ * are unaffected.
++ */
++#include <dlfcn.h>
++#include <errno.h>
++#include <stdatomic.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#define PAD_MIN_SIZE (64 * 1024)
++#define PAD_BYTES 4096
++
++typedef void* (*malloc_fn)(size_t);
++typedef void* (*calloc_fn)(size_t, size_t);
++typedef void* (*realloc_fn)(void*, size_t);
++typedef void* (*memalign_fn)(size_t, size_t);
++typedef int (*posix_memalign_fn)(void**, size_t, size_t);
++typedef void* (*aligned_alloc_fn)(size_t, size_t);
++
++static _Atomic(malloc_fn) real_malloc;
++static _Atomic(calloc_fn) real_calloc;
++static _Atomic(realloc_fn) real_realloc;
++static _Atomic(memalign_fn) real_memalign;
++static _Atomic(posix_memalign_fn) real_posix_memalign;
++static _Atomic(aligned_alloc_fn) real_aligned_alloc;
++
++/* dlsym is served by the linker's own allocator, so this never re-enters malloc. */
++#define REAL(name)                                                        \
++    ({                                                                    \
++        __typeof__(atomic_load(&real_##name)) f = atomic_load(&real_##name); \
++        if (!f) {                                                         \
++            f = (__typeof__(f))dlsym(RTLD_NEXT, #name);                   \
++            atomic_store(&real_##name, f);                                \
++        }                                                                 \
++        f;                                                                \
++    })
++
++static size_t padded(size_t size) {
++    if (size < PAD_MIN_SIZE || size > SIZE_MAX - PAD_BYTES) {
++        return size;
++    }
++    return size + PAD_BYTES;
++}
++
++void* malloc(size_t size) {
++    return REAL(malloc)(padded(size));
++}
++
++void* calloc(size_t n, size_t size) {
++    size_t total;
++    if (__builtin_mul_overflow(n, size, &total)) {
++        errno = ENOMEM;
++        return NULL;
++    }
++    return REAL(calloc)(1, padded(total));
++}
++
++void* realloc(void* ptr, size_t size) {
++    return REAL(realloc)(ptr, padded(size));
++}
++
++void* memalign(size_t alignment, size_t size) {
++    return REAL(memalign)(alignment, padded(size));
++}
++
++int posix_memalign(void** out, size_t alignment, size_t size) {
++    return REAL(posix_memalign)(out, alignment, padded(size));
++}
++
++void* aligned_alloc(size_t alignment, size_t size) {
++    size_t p = padded(size);
++    /* aligned_alloc requires size to be a multiple of alignment. */
++    if (p != size && alignment > 0 && p % alignment != 0) {
++        p += alignment - (p % alignment);
++    }
++    return REAL(aligned_alloc)(alignment, p);
++}
+diff --git a/device.mk b/device.mk
+index cca3843..e68cb54 100644
+--- a/device.mk
++++ b/device.mk
+@@ -98,7 +98,9 @@ PRODUCT_PACKAGES += \
+ 
+ # Camera
+ PRODUCT_PACKAGES += \
+-    libcamera2ndk_vendor
++    libcamera2ndk_vendor \
++    camerahalserver_pad.rc \
++    libcamhal_pad
+ 
+ # Dex-pre-opt exclusions
+ $(call add-product-dex-preopt-module-config,MotoSignatureApp,disable)
+diff --git a/init/Android.bp b/init/Android.bp
+index 82253ea..f7a5d9d 100644
+--- a/init/Android.bp
++++ b/init/Android.bp
+@@ -120,3 +120,10 @@ prebuilt_etc {
+     src: "ueventd.mt6855.rc",
+     vendor: true,
+ }
++
++prebuilt_etc {
++    name: "camerahalserver_pad.rc",
++    src: "camerahalserver_pad.rc",
++    relative_install_path: "init",
++    vendor: true,
++}
+diff --git a/init/camerahalserver_pad.rc b/init/camerahalserver_pad.rc
+new file mode 100644
+index 0000000..895ac5a
+--- /dev/null
++++ b/init/camerahalserver_pad.rc
+@@ -0,0 +1,11 @@
++# Preload libcamhal_pad into the camera HAL: see shims/camhal_pad/camhal_pad.c.
++# The file name sorts after camerahalserver.rc, which this overrides.
++service camerahalserver /vendor/bin/hw/camerahalserver
++    override
++    class main
++    user cameraserver
++    group audio camera input drmrpc sdcard_rw system media graphics
++    ioprio rt 4
++    capabilities SYS_NICE
++    task_profiles CameraServiceCapacity MaxPerformance
++    setenv LD_PRELOAD /vendor/lib64/libcamhal_pad.so
+-- 
+2.43.0
+
