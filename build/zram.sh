@@ -13,13 +13,17 @@
 # so every container shares them while zram is on.
 #
 #   ZRAM_DISKSIZE  uncompressed capacity          (default 40G)
-#   ZRAM_MEMLIMIT  cap on the compressed pool     (default 6G); when it is
-#                  full, swap-out fails and the build is OOM-killed by its
-#                  cgroup rather than the VM running dry
+#   ZRAM_MEMLIMIT  cap on the compressed pool     (default 10G); when it is
+#                  full, swap-out fails and the build stalls until
+#                  build.sh's pressure watchdog kills it. Analysis peaked
+#                  at 8.75 GiB of pool on 2026-11-14 with other workloads
+#                  holding ~3 GiB of it; an 8G cap killed two runs.
+#                  mem_limit is write-only and can be raised live:
+#                  echo 10G > /sys/block/zram0/mem_limit (read mm_stat).
 set -euo pipefail
 
 ZRAM_DISKSIZE=${ZRAM_DISKSIZE:-40G}
-ZRAM_MEMLIMIT=${ZRAM_MEMLIMIT:-6G}
+ZRAM_MEMLIMIT=${ZRAM_MEMLIMIT:-10G}
 
 # The VM's kernel is shared by all containers; a privileged one can load the
 # module and manage swap for the whole VM.
