@@ -49,11 +49,32 @@ docker run --rm --name lineage-sign --memory=8g --cpus=4 -v "$VOL":/lin "$IMAGE"
         apex_args+=(--extra_apks "$apex=$K/$k" --extra_apex_payload_key "$apex=$K/$k.pem")
     done
 
+    # LineageOS adds its official key to recovery (PRODUCT_EXTRA_RECOVERY_KEYS
+    # in vendor/lineage/config/common.mk), so recovery would also install any
+    # zip signed by official LineageOS. Sign from a copy without that list.
+    work=$out/work
+    rm -rf "$work"; mkdir -p "$work/META"
+    cp "$TF" "$work/tf.zip"
+    unzip -p "$TF" META/misc_info.txt | grep -v "^extra_recovery_keys=" > "$work/META/misc_info.txt"
+    (cd "$work" && zip -q tf.zip META/misc_info.txt)
+
     signed_tf=$out/lineage_cancunf-$id-signed-target_files.zip
     sign_target_files_apks $tools -o -d "$K" "${apex_args[@]}" \
         --avb_vbmeta_key "$K/avb.pem" --avb_vbmeta_algorithm SHA256_RSA4096 \
         --avb_vbmeta_system_key "$K/avb.pem" --avb_vbmeta_system_algorithm SHA256_RSA4096 \
-        "$TF" "$signed_tf"
+        "$work/tf.zip" "$signed_tf"
+    rm -rf "$work"
+
+    # Every OTA trust store must hold exactly our release certificate.
+    want=$(openssl x509 -in "$K/releasekey.x509.pem" -noout -fingerprint -sha256)
+    for z in $(unzip -Z1 "$signed_tf" | grep "/otacerts.zip$"); do
+        unzip -p "$signed_tf" "$z" > "$out/otacerts.check.zip"
+        n=$(unzip -Z1 "$out/otacerts.check.zip" | wc -l)
+        got=$(unzip -p "$out/otacerts.check.zip" | openssl x509 -noout -fingerprint -sha256)
+        rm -f "$out/otacerts.check.zip"
+        [ "$n" = 1 ] && [ "$got" = "$want" ] || { echo "$z: expected only the release certificate, found $n entries" >&2; exit 1; }
+        echo "trust store ok: $z"
+    done
 
     ota=$out/lineage-$ver-signed.zip
     ota_from_target_files $tools -k "$K/releasekey" "$signed_tf" "$ota"
