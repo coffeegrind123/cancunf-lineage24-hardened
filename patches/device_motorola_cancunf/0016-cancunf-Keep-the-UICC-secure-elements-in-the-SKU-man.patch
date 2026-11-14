@@ -1,0 +1,195 @@
+From 75000411bd3f6c0f8b0f656a272165dbd62c7dd6 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sat, 14 Nov 2026 16:08:10 +0000
+Subject: [PATCH] cancunf: Keep the UICC secure elements in the SKU manifests
+
+An override with no instances erases every HAL of that name, HIDL
+included. The SKU manifests disabled the NXP AIDL eSE that way after
+declaring the HIDL ISecureElement SIM instances, so the SIM entries
+were erased too: the MediaTek UICC secure-element HAL was refused
+registration and restarted every 5 s. Put the empty override first and
+declare the SIM instances after it, matching what stock ends up with.
+---
+ configs/vintf/sku/manifest_b.xml  | 21 +++++++++++++++++---
+ configs/vintf/sku/manifest_d.xml  | 21 +++++++++++++++++---
+ configs/vintf/sku/manifest_dn.xml | 33 +++++++++++++++++--------------
+ configs/vintf/sku/manifest_n.xml  | 29 +++++++++++++++------------
+ 4 files changed, 70 insertions(+), 34 deletions(-)
+
+diff --git a/configs/vintf/sku/manifest_b.xml b/configs/vintf/sku/manifest_b.xml
+index 384ca97..ef8d3e4 100644
+--- a/configs/vintf/sku/manifest_b.xml
++++ b/configs/vintf/sku/manifest_b.xml
+@@ -1,4 +1,22 @@
+ <manifest version="4.0" type="device">
++    <!-- Order matters: an empty override erases every HAL with this name,
++         HIDL included, so it must come first and the UICC (SIM) secure
++         elements are then declared again, as on stock. -->
++    <hal format="aidl" override="true">
++        <name>android.hardware.secure_element</name>
++    </hal>
++    <hal format="hidl" override="true">
++        <name>android.hardware.secure_element</name>
++        <transport>hwbinder</transport>
++        <version>1.2</version>
++        <interface>
++            <name>ISecureElement</name>
++            <instance>SIM1</instance>
++            <instance>SIM2</instance>
++        </interface>
++        <fqname>@1.2::ISecureElement/SIM1</fqname>
++        <fqname>@1.2::ISecureElement/SIM2</fqname>
++    </hal>
+     <hal format="hidl" override="true">
+         <name>android.hardware.radio</name>
+         <transport>hwbinder</transport>
+@@ -62,7 +80,4 @@
+         <fqname>@3.0::IRadioOp/OpImsRILd1</fqname>
+         <fqname>@3.0::IRadioOp/slot1</fqname>
+     </hal>
+-    <hal format="aidl" override="true">
+-        <name>android.hardware.secure_element</name>
+-    </hal>
+ </manifest>
+diff --git a/configs/vintf/sku/manifest_d.xml b/configs/vintf/sku/manifest_d.xml
+index a9b7de4..7eb8b58 100644
+--- a/configs/vintf/sku/manifest_d.xml
++++ b/configs/vintf/sku/manifest_d.xml
+@@ -1,4 +1,22 @@
+ <manifest version="4.0" type="device">
++    <!-- Order matters: an empty override erases every HAL with this name,
++         HIDL included, so it must come first and the UICC (SIM) secure
++         elements are then declared again, as on stock. -->
++    <hal format="aidl" override="true">
++        <name>android.hardware.secure_element</name>
++    </hal>
++    <hal format="hidl" override="true">
++        <name>android.hardware.secure_element</name>
++        <transport>hwbinder</transport>
++        <version>1.2</version>
++        <interface>
++            <name>ISecureElement</name>
++            <instance>SIM1</instance>
++            <instance>SIM2</instance>
++        </interface>
++        <fqname>@1.2::ISecureElement/SIM1</fqname>
++        <fqname>@1.2::ISecureElement/SIM2</fqname>
++    </hal>
+     <hal format="hidl" override="true">
+         <name>android.hardware.radio</name>
+         <transport>hwbinder</transport>
+@@ -82,7 +100,4 @@
+         <fqname>@3.0::IMtkRadioEx/mtkSmartRatSwitch1</fqname>
+         <fqname>@3.0::IMtkRadioEx/mtkSmartRatSwitch2</fqname>
+     </hal>
+-    <hal format="aidl" override="true">
+-        <name>android.hardware.secure_element</name>
+-    </hal>
+ </manifest>
+diff --git a/configs/vintf/sku/manifest_dn.xml b/configs/vintf/sku/manifest_dn.xml
+index ddbd143..4d7d702 100644
+--- a/configs/vintf/sku/manifest_dn.xml
++++ b/configs/vintf/sku/manifest_dn.xml
+@@ -1,4 +1,22 @@
+ <manifest version="4.0" type="device">
++    <!-- Order matters: an empty override erases every HAL with this name,
++         HIDL included, so it must come first and the UICC (SIM) secure
++         elements are then declared again, as on stock. -->
++    <hal format="aidl" override="true">
++        <name>android.hardware.secure_element</name>
++    </hal>
++    <hal format="hidl" override="true">
++        <name>android.hardware.secure_element</name>
++        <transport>hwbinder</transport>
++        <version>1.2</version>
++        <interface>
++            <name>ISecureElement</name>
++            <instance>SIM1</instance>
++            <instance>SIM2</instance>
++        </interface>
++        <fqname>@1.2::ISecureElement/SIM1</fqname>
++        <fqname>@1.2::ISecureElement/SIM2</fqname>
++    </hal>
+     <hal format="hidl">
+         <name>android.hardware.nfc</name>
+         <transport>hwbinder</transport>
+@@ -48,18 +66,6 @@
+         <fqname>@1.6::IRadio/slot1</fqname>
+         <fqname>@1.6::IRadio/slot2</fqname>
+     </hal>
+-    <hal format="hidl" override="true">
+-        <name>android.hardware.secure_element</name>
+-        <transport>hwbinder</transport>
+-        <version>1.2</version>
+-        <interface>
+-            <name>ISecureElement</name>
+-            <instance>SIM1</instance>
+-            <instance>SIM2</instance>
+-        </interface>
+-        <fqname>@1.2::ISecureElement/SIM1</fqname>
+-        <fqname>@1.2::ISecureElement/SIM2</fqname>
+-    </hal>
+     <hal format="hidl" override="true">
+         <name>vendor.mediatek.hardware.mtkradioex</name>
+         <transport>hwbinder</transport>
+@@ -104,7 +110,4 @@
+         <fqname>@3.0::IMtkRadioEx/mtkSmartRatSwitch1</fqname>
+         <fqname>@3.0::IMtkRadioEx/mtkSmartRatSwitch2</fqname>
+     </hal>
+-    <hal format="aidl" override="true">
+-        <name>android.hardware.secure_element</name>
+-    </hal>
+ </manifest>
+diff --git a/configs/vintf/sku/manifest_n.xml b/configs/vintf/sku/manifest_n.xml
+index 5cd82f9..b3e0211 100644
+--- a/configs/vintf/sku/manifest_n.xml
++++ b/configs/vintf/sku/manifest_n.xml
+@@ -1,4 +1,20 @@
+ <manifest version="4.0" type="device">
++    <!-- Order matters: an empty override erases every HAL with this name,
++         HIDL included, so it must come first and the UICC (SIM) secure
++         elements are then declared again, as on stock. -->
++    <hal format="aidl" override="true">
++        <name>android.hardware.secure_element</name>
++    </hal>
++    <hal format="hidl" override="true">
++        <name>android.hardware.secure_element</name>
++        <transport>hwbinder</transport>
++        <version>1.2</version>
++        <interface>
++            <name>ISecureElement</name>
++            <instance>SIM1</instance>
++        </interface>
++        <fqname>@1.2::ISecureElement/SIM1</fqname>
++    </hal>
+     <hal format="hidl">
+         <name>android.hardware.nfc</name>
+         <transport>hwbinder</transport>
+@@ -34,16 +50,6 @@
+         <fqname>@1.6::IRadio/se1</fqname>
+         <fqname>@1.6::IRadio/slot1</fqname>
+     </hal>
+-    <hal format="hidl" override="true">
+-        <name>android.hardware.secure_element</name>
+-        <transport>hwbinder</transport>
+-        <version>1.2</version>
+-        <interface>
+-            <name>ISecureElement</name>
+-            <instance>SIM1</instance>
+-        </interface>
+-        <fqname>@1.2::ISecureElement/SIM1</fqname>
+-    </hal>
+     <hal format="hidl" override="true">
+         <name>vendor.mediatek.hardware.mtkradioex</name>
+         <transport>hwbinder</transport>
+@@ -82,7 +88,4 @@
+         <fqname>@3.0::IRadioOp/OpImsRILd1</fqname>
+         <fqname>@3.0::IRadioOp/slot1</fqname>
+     </hal>
+-    <hal format="aidl" override="true">
+-        <name>android.hardware.secure_element</name>
+-    </hal>
+ </manifest>
+-- 
+2.43.0
+
