@@ -8,7 +8,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Restore tooling (fastboot set + root-only per-device partitions) | done; `boot_a` restore used for real |
 | Bootloader unlock + temporary root (Magisk v27.0) | done; v28+ is refused by this bootloader, see [docs/03-root.md](docs/03-root.md) |
 | Build host on Windows/WSL2 with a hard memory cap | done; Android 17 analysis runs with zram, see [docs/04-build-host.md](docs/04-build-host.md) |
-| Plain LineageOS 24 for cancunf | built 2026-11-12 and release-signed (1.68 GB OTA); not flashed yet. Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
+| Plain LineageOS 24 for cancunf | built and release-signed 2026-11-12; installed, then bootlooped: the thermal HAL is missing `pixelatoms-cpp.so` and system_server's watchdog kills it. Fix being built. See [docs/09-first-install.md](docs/09-first-install.md). Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
 | Release keys and signing | done: [`build/keys.sh`](build/keys.sh), [`build/sign.sh`](build/sign.sh); keys stay on the build disk |
 | GrapheneOS GmsCompat (sandboxed Google Play) | planned (phase 2) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
@@ -30,6 +30,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 6. [GmsCompat port](docs/06-gmscompat-port.md): commit order and prerequisites for porting GrapheneOS's sandboxed Google Play.
 7. [Maintenance](docs/07-maintenance.md): which layers get security fixes and from where, release keys, the periodic update procedure, and OTA delivery from GitHub.
 8. [Kernel](docs/08-kernel.md): our DragonHeart-based kernel, how GrapheneOS's 93 kernel hardening commits sort for 5.10, and the per-release kernel procedure.
+9. [First install](docs/09-first-install.md): the install route that worked (SD card, not sideload), open recovery issues, and how the bootloop was diagnosed without adb.
 
 ## Layout
 
@@ -42,6 +43,8 @@ build/                               Dockerfile, local manifest, sync, survey an
 build/zram.sh                        compressed RAM swap for the VM, which Android 17's analysis needs
 build/keys.sh, build/sign.sh         release keys (on the build disk only) and release signing
 build/soong-prune.py                 generates the device's Soong prune list
+build/debug-sign.sh                  signed DEBUG OTA: the build plus an overlay of extra files
+debug/sdlog/                         debug overlay: boot logs to /metadata, copied to the SD card by recovery
 patches/<project>/                   our commits on top of the synced trees (build/apply-patches.sh)
 ```
 
