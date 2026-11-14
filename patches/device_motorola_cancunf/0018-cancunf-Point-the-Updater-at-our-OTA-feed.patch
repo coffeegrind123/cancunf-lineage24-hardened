@@ -1,0 +1,29 @@
+From c137194191b42dd5ad0bd225fa1d265c7c07acdb Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sat, 14 Nov 2026 16:31:57 +0000
+Subject: [PATCH] cancunf: Point the Updater at our OTA feed
+
+Releases are published as GitHub releases with a JSON feed on the
+repository's ota branch. The Updater fetches the feed without
+following redirects, so it is read from raw.githubusercontent.com.
+---
+ lineage_cancunf.mk | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/lineage_cancunf.mk b/lineage_cancunf.mk
+index d248ffd..23dbb0f 100644
+--- a/lineage_cancunf.mk
++++ b/lineage_cancunf.mk
+@@ -29,3 +29,9 @@ PRODUCT_GMS_CLIENTID_BASE := android-motorola
+ 
+ PRODUCT_BUILD_PROP_OVERRIDES += \
+     DeviceName=cancunf
++
++# OTA feed for the Updater, published by build/publish.sh in
++# github.com/coffeegrind123/cancunf-lineage24-hardened. raw.githubusercontent
++# serves it without a redirect, which the Updater does not follow.
++PRODUCT_SYSTEM_PROPERTIES += \
++    lineage.updater.uri=https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/ota.json
+-- 
+2.43.0
+
