@@ -1,0 +1,30 @@
+From a45664bbb07c71b693da4c359df6a272ee174440 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sat, 14 Nov 2026 11:09:54 +0000
+Subject: [PATCH] cancunf: Export the pixelstats Soong namespace
+
+The MediaTek thermal HAL links pixelatoms-cpp, which lives in
+hardware/google/pixel/pixelstats, its own Soong namespace. Unexported,
+Soong links the HAL but Make never installs the library, so the HAL
+fails to link at runtime. system_server then blocks in
+HardwarePropertiesManagerService waiting for IThermal until its
+watchdog kills it, and the device bootloops.
+---
+ device.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/device.mk b/device.mk
+index 508b714..cca3843 100644
+--- a/device.mk
++++ b/device.mk
+@@ -405,6 +405,7 @@ PRODUCT_COPY_FILES += \
+ PRODUCT_SOONG_NAMESPACES += \
+     hardware/google/interfaces \
+     hardware/google/pixel \
++    hardware/google/pixel/pixelstats \
+     hardware/google/pixel/power-libperfmgr \
+     hardware/mediatek \
+     hardware/mediatek/libmtkperf_client \
+-- 
+2.43.0
+
