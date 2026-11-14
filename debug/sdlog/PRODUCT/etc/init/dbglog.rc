@@ -1,0 +1,11 @@
+# DEBUG-ONLY (bootloop diagnosis): log to /metadata/dbglog.
+# Runs in the userdebug-only permissive su domain; never ship this.
+on post-fs-data
+    start dbglog
+
+service dbglog /system/bin/sh /product/etc/dbglog.sh
+    user root
+    group root log system
+    seclabel u:r:su:s0
+    disabled
+    oneshot

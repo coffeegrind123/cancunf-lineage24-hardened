@@ -1,0 +1,16 @@
+# DEBUG-ONLY: in recovery, copy /metadata/dbglog and recovery's own logs to the SD card.
+on boot
+    # Marker via init builtins only (no exec, no su): proves which path works.
+    mkdir /dev/dbgmk 0700 root root
+    mount vfat /dev/block/mmcblk1p1 /dev/dbgmk
+    mount vfat /dev/block/mmcblk0p1 /dev/dbgmk
+    write /dev/dbgmk/INIT_BUILTIN_MARKER.txt "written by recovery init builtins\n"
+    umount /dev/dbgmk
+    start dbgcopy
+
+service dbgcopy /system/bin/sh /system/etc/dbgcopy.sh
+    user root
+    group root
+    seclabel u:r:su:s0
+    disabled
+    oneshot
