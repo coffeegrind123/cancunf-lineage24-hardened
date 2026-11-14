@@ -121,4 +121,7 @@ Found, not yet fixed:
 - SELinux denials, none of which stops a service: Moto's vendor init scripts (block devices, sysfs, vendor props), `system_suspend` reading battery sysfs, and `vendor_init` setting MTK props.
 - Optional `dlopen` misses from the bootloop logs (camera tuning libraries, `sounddose`) still need checking with real use: take photos, play audio.
 
-Not checkable without interaction: photo and video capture, playback and calls, fingerprint enrolment, a GPS fix, Wi-Fi and Bluetooth connections, and SIM features.
+Hands-on (same day): camera, audio, Wi-Fi and Bluetooth work; fingerprint not tried yet; calls and SIM features need a SIM.
+
+- **GNSS works.** Indoors the engine ran for minutes and heard nothing (NMEA `GGA` with 0 satellites, `measurement_count = 0`). By a window, GPSTest showed GLONASS and BeiDou satellites at about 25 dB-Hz within minutes. The `get consys pinctrl fail` / `eLNA_pin:-1` lines are harmless: `WMT_SOC.cfg` sets `wmt_gps_lna_enable=0` and the GPS driver switches the L1 LNA itself (`gps_lna_pin_ctrl ... select ret = 0`). No location indoors is expected on LineageOS without Google: nothing turns Wi-Fi or cell towers into a position until GmsCompat (phase 2).
+- **Camera HAL crash, open:** `camerahalserver` died once with `SIGSEGV` (`SEGV_ACCERR`) inside Motorola's ArcSoft low-light library `libarcsoft_portrait_super_night_se_raw_lite.so`, on its `SuperNightPlugin` thread. The HAL restarts on its own. It's a closed blob; reproduce it (low light) before looking further.
