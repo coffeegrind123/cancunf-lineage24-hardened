@@ -68,48 +68,55 @@ Run by the agent, after the owner approves the build:
    - If GrapheneOS rebased onto a new AOSP tag (`android-17.0.0_rN`), re-check the base with the same `ls-remote` method used in the survey.
    - Update `ported.json` with the new heads.
 5. **Build and sign.**
-   - `build/zram.sh on`
-   - `build/build.sh` (the default target, `bacon`)
-   - `TARGET=target-files-package build/build.sh`
-   - `build/sign.sh`
+   - `build/zram.sh on` (after any VM restart; check with `build/zram.sh status`).
+   - `TARGET=target-files-package build/build.sh`. Analysis needs about 8 GB of RAM plus up to ~9 GiB of compressed zram pool (default cap 10G); see "Build host memory" below.
+   - `build/sign.sh`. It fails the release unless every `otacerts.zip` holds only our release certificate.
    - Test-keys output is for development only.
 6. **Make the packages:**
-   - a full OTA
-   - incrementals from the previous published releases. Keep every published `target_files.zip` on the build disk, because an incremental needs the old one.
+   - The full OTA comes from `sign.sh`.
+   - Incrementals from earlier published releases are still to do. Keep every published `*-signed-target_files.zip` on the build disk, because an incremental needs the old one.
 7. **Test on the phone before publishing.**
-   - Install the update over the previous release.
-   - Check: boot, slot switch, IMS service up, Wi-Fi, Bluetooth, cameras, fingerprint, GmsCompat Play services, Play Integrity verdict, banking app.
-   - Check that the agent bridge, Titanium and Ovis still work.
-8. **Publish.** Create a GitHub release with the OTA packages, the update metadata and release notes, and record the security patch levels of all layers.
+   - Install over the previous release with the Updater's local import ([09-first-install.md](09-first-install.md#updating-an-installed-phone)): `adb push` the zip to `Download/`, then **Install local update**, **Install**, and reboot.
+   - Check over adb: build date and slot, `sys.boot_completed`, no services stuck in `restarting`, crash buffer and `/data/tombstones`.
+   - Hands-on: Wi-Fi, Bluetooth, cameras (including Night Vision, which exercises the camera HAL padding shim), fingerprint, GPS outdoors, IMS once a SIM is in. Later phases add GmsCompat Play services, the Play Integrity verdict, a banking app, the agent bridge, Titanium and Ovis.
+   - If the build fails to boot, the logs are on the SD card through a debug OTA: `build/debug-sign.sh debug/sdlog` (see [09-first-install.md](09-first-install.md#logging-without-adb-debugsdlog)).
+8. **Publish:** `build/publish.sh` (see below). Write the security patch levels of every layer into the release notes.
+
+### Build host memory
+
+- The build container is capped at 8 GB of RAM. Analysis puts ~26 GB of its heap in zram, at about 4:1 compression, and the zram pool also holds other workloads' cold pages (~3 GiB measured). An 8 GiB pool cap filled and the pressure watchdog killed two builds; 10G is now the default (`build/zram.sh`). The cap is write-only and can be raised live: `echo 10G > /sys/block/zram0/mem_limit` from a privileged container; `mm_stat` shows it.
+- Don't run other heavy jobs during analysis (another project's CI, large adb pushes).
+- Claude Code stops idle background shells when memory gets low, and `build.sh`'s watchdog lives in that shell. The `claude` alias sets `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`, so only the build's own guards end a build. If a build container is ever left running without its `build.sh`, stop it: it has no memory guard.
 
 ## OTA delivery from GitHub
 
-**Hosting.** Updates are GitHub release assets on this repo.
-- GitHub limits each release file to under 2 GiB. PixelOS's comparable full zip is 2.81 GB (`PixelOS_cancunf-16.2-20260609-0618.zip`), which raised the question of whether ours would fit.
-- **Measured on our first release: the signed full OTA is 1.68 GB** (1,680,937,359 bytes), under the limit. It fits as a GitHub release asset as it stands. Growth from GmsCompat, Pixel assets and preloads (phases 2, 7, 10) could push it over; check each release, and move full packages to other hosting only if one crosses 2 GiB.
-- The fastboot images zip is 2.37 GB, over the limit. It is only needed for a first install and is not published.
+What runs today, measured on build `1794688012` (2026-11-14):
 
-**Updater on the phone: the GrapheneOS Updater**
-([GrapheneOS/platform_packages_apps_Updater](https://github.com/GrapheneOS/platform_packages_apps_Updater), MIT, branch `17`)
+```
+build.sh -> sign.sh -> publish.sh ---> GitHub release cancunf-<build id>   (the OTA zip)
+                                  \--> branch "ota": ota.json               (the feed)
+phone: Updater -> raw.githubusercontent.com/.../ota/ota.json -> zip URL -> update_engine
+```
 
-- **What it is.**
-  - It updates automatically in the background through `update_engine`, streams the payload, prefers incremental packages, and falls back to a full package.
-  - Release channels (stable/beta) can be chosen in its settings.
-  - The server URL is one resource (`res/values/config.xml` → `url`), overridden with an overlay rather than a fork.
-  - It reads `<url><device>-<channel>` metadata, then downloads update files from the same base.
-  - The metadata format comes from GrapheneOS's [`script/generate-metadata`](https://github.com/GrapheneOS/script).
-- **Base URL:** `https://github.com/coffeegrind123/cancunf-lineage24-hardened/releases/latest/download/`.
-  - GitHub redirects that to the latest release's files, so `cancunf-stable` and the update packages resolve there.
-  - Each release has to carry the incrementals from earlier builds as well as the full OTA.
-- **Open questions, to test first:**
-  - Whether `update_engine`'s HTTP fetcher follows GitHub's redirect to the storage host and gets the range requests that streaming needs.
-  - Whether the Updater depends on GrapheneOS's `system/update_engine` changes (GrapheneOS ships its own `platform_system_update_engine`).
+**`build/publish.sh [build id]`** (defaults to the newest `/lin/release/<id>/`):
 
-**Fallback: LineageOS Updater**, already in the build.
-- Point the `lineage.updater.uri` property at a JSON file. LineageOS's v2 format:
-  - per build: `datetime`, `type`, `version` and `files[]`
-  - per file: `filename`, `size`, `url`, `os_patch_level`, `sha256`
-- It downloads and then installs. The JSON can be a release asset, for example `releases/latest/download/updates.json`.
-- It is manual (the user taps install), but needs no porting.
+1. Reads the facts from the signed package itself: `ro.build.date.utc`, SDK level, security patch, `ro.lineage.releasetype` and version, the zip's size and SHA-256. It refuses a build that isn't `release-keys`.
+2. Creates release `cancunf-<id>` with the OTA zip, then checks GitHub's own SHA-256 of the uploaded asset against ours.
+3. Force-pushes a one-commit `ota` branch holding `ota.json`, and waits until `raw.githubusercontent.com` serves the identical file.
+4. Deletes every older `cancunf-*` release and its tag. Only the latest release is kept on GitHub, and the old ones go only after the new feed is live, so the feed never points at a deleted file.
 
-The GrapheneOS Updater is the target, because it gives the same unattended experience as GrapheneOS. The LineageOS Updater stays available until the GrapheneOS one is verified on the phone.
+`DRY_RUN=1` prints the feed entry and publishes nothing. Uploading a 1.68 GB full OTA takes about 25 minutes on this connection (~1 MB/s).
+
+**Updater on the phone: the LineageOS Updater**, with the feed set by device patch 0018 (`lineage.updater.uri`). Facts from its source that shaped the design:
+
+- **The feed client doesn't follow redirects** (`followRedirects(false)`), so the feed can't be a release asset or `releases/latest/download/...`, which are both redirects. `raw.githubusercontent.com` answers 200 directly.
+- **The zip download follows one redirect** on the same scheme (`setUseDuplicateLinks(true)`), which is exactly what a GitHub release asset needs (`github.com` → `release-assets.githubusercontent.com`).
+- **Property values are capped at 91 bytes.** `https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/cancunf.json` was 92 and failed the build; `.../ota/ota.json` is 88.
+- An entry is offered only if its `type` matches `ro.lineage.releasetype` (`UNOFFICIAL`), its `datetime` is newer than the installed `ro.build.date.utc`, and its `os_sdk_level` is not lower. A published build can't be reinstalled by mistake.
+- `ota_property_files` (streaming offsets) is left out, so the Updater downloads, verifies, then installs.
+- Without the property, the Updater contacts `download.lineageos.org`. Builds with patch 0018 no longer do.
+
+**Hosting limits.** GitHub release files must be under 2 GiB. The full OTA is 1.68 GB; growth from GmsCompat, Pixel assets and preloads (phases 2, 7, 10) could cross it, so check every release. The fastboot images zip (2.37 GB) is only needed for a first install and isn't published.
+
+**Later: the GrapheneOS Updater**
+([GrapheneOS/platform_packages_apps_Updater](https://github.com/GrapheneOS/platform_packages_apps_Updater), MIT, branch `17`). It updates unattended through `update_engine`, streams the payload and prefers incrementals. Open before porting: whether it depends on GrapheneOS's own `update_engine` changes, whether `update_engine` follows GitHub's redirect and gets range requests for streaming, and its metadata format (`script/generate-metadata`). Until that is verified, the LineageOS Updater above stays.
