@@ -125,3 +125,16 @@ Hands-on (same day): camera, audio, Wi-Fi and Bluetooth work; fingerprint not tr
 
 - **GNSS works.** Indoors the engine ran for minutes and heard nothing (NMEA `GGA` with 0 satellites, `measurement_count = 0`). By a window, GPSTest showed GLONASS and BeiDou satellites at about 25 dB-Hz within minutes. The `get consys pinctrl fail` / `eLNA_pin:-1` lines are harmless: `WMT_SOC.cfg` sets `wmt_gps_lna_enable=0` and the GPS driver switches the L1 LNA itself (`gps_lna_pin_ctrl ... select ret = 0`). No location indoors is expected on LineageOS without Google: nothing turns Wi-Fi or cell towers into a position until GmsCompat (phase 2).
 - **Camera HAL crash, open:** `camerahalserver` died once with `SIGSEGV` (`SEGV_ACCERR`) inside Motorola's ArcSoft low-light library `libarcsoft_portrait_super_night_se_raw_lite.so`, on its `SuperNightPlugin` thread. The HAL restarts on its own. It's a closed blob; reproduce it (low light) before looking further.
+
+## Updating an installed phone
+
+Measured with build `1794672767` over `1794655118` (2026-11-14), no wipe:
+
+1. `adb push` the signed OTA to `/sdcard/Download/`, and compare its SHA-256 on the phone.
+2. **Updater → Install local update**, then pick the file in Downloads. The Updater checks the whole-file signature against `/system/etc/security/otacerts.zip` (our release key) before it shows "Update imported".
+3. **Install → OK.** `update_engine` writes the inactive slot in the background (about 5 minutes here), verifies every partition by hash, runs postinstall, then reports `Update successfully applied, waiting to reboot`.
+4. Reboot. The phone comes up on the other slot with data intact.
+
+The Updater has no external entry point for a zip (only the system file picker), so without root it can't be started purely from adb. The steps above can be driven over adb with `uiautomator dump` and `input tap` while the phone is unlocked.
+
+Release builds get the OTA feed (device patch 0018): a JSON on the repository's `ota` branch, read from `raw.githubusercontent.com` because the Updater's feed client doesn't follow redirects. The zip itself is a GitHub release asset; the Updater's downloader follows that one redirect.
