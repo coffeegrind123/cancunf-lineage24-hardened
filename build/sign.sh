@@ -8,6 +8,7 @@
 # Output goes to /lin/release/<build id>/:
 #   *-signed-target_files.zip   keep every published one: incrementals need it
 #   lineage-*-signed.zip         the full OTA, signed with releasekey
+#                                (build/incremental.sh adds *-incr-<id>-signed.zip)
 #   *-signed-img.zip             fastboot images (boot, vendor_boot, ...) for the
 #                                first install
 # Nothing is recompiled: APKs, APEXes, AVB and the OTA certificate are re-signed
