@@ -6,24 +6,29 @@ Subject: [PATCH] cancunf: Point the Updater at our OTA feed
 Releases are published as GitHub releases with a JSON feed on the
 repository's ota branch. The Updater fetches the feed without
 following redirects, so it is read from raw.githubusercontent.com.
+The URI carries {incr}, so each build reads its own feed file and
+can be offered an incremental update.
 ---
- lineage_cancunf.mk | 6 ++++++
- 1 file changed, 6 insertions(+)
+ lineage_cancunf.mk | 9 +++++++++
+ 1 file changed, 9 insertions(+)
 
 diff --git a/lineage_cancunf.mk b/lineage_cancunf.mk
 index d248ffd..23dbb0f 100644
 --- a/lineage_cancunf.mk
 +++ b/lineage_cancunf.mk
-@@ -29,3 +29,9 @@ PRODUCT_GMS_CLIENTID_BASE := android-motorola
+@@ -29,3 +29,12 @@ PRODUCT_GMS_CLIENTID_BASE := android-motorola
  
  PRODUCT_BUILD_PROP_OVERRIDES += \
      DeviceName=cancunf
 +
 +# OTA feed for the Updater, published by build/publish.sh in
 +# github.com/coffeegrind123/cancunf-lineage24-hardened. raw.githubusercontent
-+# serves it without a redirect, which the Updater does not follow.
++# serves it without a redirect, which the Updater does not follow. The
++# Updater replaces {incr} with ro.build.version.incremental (the build id),
++# so each installed build reads its own file and can get an incremental.
++# Property values are capped at 91 bytes; this one is exactly 91.
 +PRODUCT_SYSTEM_PROPERTIES += \
-+    lineage.updater.uri=https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/ota.json
++    lineage.updater.uri=https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/{incr}.json
 -- 
 2.43.0
 
