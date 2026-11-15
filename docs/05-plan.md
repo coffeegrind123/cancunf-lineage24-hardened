@@ -89,8 +89,8 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 1. **Plain LineageOS 24 cancunf:**
    - product makefile and build: **done 2026-11-12.** Fourteen device patches, three vendor and one DisplayFeatures patch were needed ([04-build-host.md](04-build-host.md#our-changes-to-synced-trees)).
    - release keys and a release-signed OTA: done ([07-maintenance.md](07-maintenance.md#release-keys))
-   - flash: next. The first install moves the phone to Android 15 firmware (`V1TDS35H.83-20-5-11`), which the owner approved.
-   - check the hardware matrix and IMS service startup
+   - flash: **done 2026-11-14** from SD card; the phone is on Android 15 firmware (`V1TDS35H.83-20-5-11`), which the owner approved ([09-first-install.md](09-first-install.md)).
+   - hardware matrix and IMS service startup: **done without a SIM** ([09-first-install.md](09-first-install.md#first-boot-hardware-check-over-adb-no-sim)). Calls wait for phase 5.
    - restore path: [01-backup.md](01-backup.md)
 2. **GmsCompat port** plus sandboxed Play.
 3. **Hardening**, one feature per build, each verified on the phone.

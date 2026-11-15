@@ -104,6 +104,16 @@ The first patch replaces YAAP's product with `lineage_cancunf`. The rest port YA
 | device 0014, vendor 0004 | `libsink-mtk` (IMS video calls) gets LineageOS's `libaudioclient_shim` for an `AudioTrack` constructor Android 17 removed |
 | DisplayFeatures 0001 | YAAP-only DC-dimming settings keys defined in the app (cancunf has no DC-dimming node) |
 
+Later patches fix what the first installs found on the phone, or add features:
+
+| Patch | What and why |
+|---|---|
+| device 0015 | export the `pixelstats` Soong namespace: `pixelatoms-cpp.so` was linked against but never installed, and the thermal HAL failed to load ([09-first-install.md](09-first-install.md)) |
+| device 0016 | keep the UICC secure-element HAL instances in the SKU manifests; an empty override erased them |
+| device 0017 | preload `libcamhal_pad` into camerahalserver: Motorola's ArcSoft low-light blob reads past large buffers |
+| device 0018 | `lineage.updater.uri` points the Updater at our per-build feed ([07-maintenance.md](07-maintenance.md#ota-delivery-from-github)) |
+| Updater 0001 | label incremental entries as incremental and block one made from another build; the stock Updater called every entry "Full install" |
+
 Binary edits to vendor blobs (renames, `patchelf`) are not stored as patches, because this repo carries no proprietary files. `apply-patches.sh` performs them after the vendor patches, matching what `extract-files.py` would now produce. `BRANCH=<name>` lets a scratch worktree verify the series without moving the live branch: the whole series reproduces the built trees byte for byte.
 
 Checked before writing it:

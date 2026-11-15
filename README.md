@@ -8,7 +8,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Restore tooling (fastboot set + root-only per-device partitions) | done; `boot_a` restore used for real |
 | Bootloader unlock + temporary root (Magisk v27.0) | done; v28+ is refused by this bootloader, see [docs/03-root.md](docs/03-root.md) |
 | Build host on Windows/WSL2 with a hard memory cap | done; Android 17 analysis runs with zram, see [docs/04-build-host.md](docs/04-build-host.md) |
-| Plain LineageOS 24 for cancunf | boots: build `1794655118` (2026-11-14, release-signed) installed from SD card and through setup. The first build bootlooped on a missing thermal-HAL library, fixed by device patch 0015; see [docs/09-first-install.md](docs/09-first-install.md). Hardware matrix next. Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
+| Plain LineageOS 24 for cancunf | done: release-signed builds run on the phone; hardware checked without a SIM (sensors, cameras, Wi-Fi, BT, NFC, GNSS, audio, modem). The first build bootlooped on a missing thermal-HAL library, fixed by device patch 0015; see [docs/09-first-install.md](docs/09-first-install.md). Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
 | Release keys and signing | done: [`build/keys.sh`](build/keys.sh), [`build/sign.sh`](build/sign.sh); keys stay on the build disk |
 | GrapheneOS GmsCompat (sandboxed Google Play) | planned (phase 2) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
@@ -16,14 +16,14 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | VoLTE calls / SMS | phase 5. No SIM yet, so only the no-SIM half can be verified |
 | pi coding agent with system access (privileged bridge, Computer Control) | planned (phase 6) |
 | Preloaded Titanium Browser and Ovis | planned (phase 7) |
-| OTA updates from GitHub releases (GrapheneOS Updater), periodic re-port | planned (phase 8), runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
+| OTA updates from GitHub releases, periodic re-port | running with the LineageOS Updater: per-build feed, incrementals from the three newest older builds, streamed installs, both full and incremental verified on the phone. GrapheneOS Updater optional later. Runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
 | Pixel look and feel (fonts, sounds, clocks, ThemePicker, optional Pixel Launcher) from PixelOS's Pixel repos | planned (phase 10) |
 | Own kernel ([fork](https://github.com/coffeegrind123/kernel_motorola_cancunf)): Google `android12-5.10` fixes plus GrapheneOS hardening | planned (phase 9), [docs/08-kernel.md](docs/08-kernel.md) |
 
 ## Docs
 
 1. [Stock backup and restore](docs/01-backup.md): what was dumped, how it was verified, and how to put it back.
-2. [Windows fastboot with a Motorola bootloader](docs/02-windows-fastboot.md): the Zadig driver plus the interface GUID that `fastboot.exe` needs.
+2. [Windows fastboot with a Motorola bootloader](docs/02-windows-fastboot.md): the Zadig driver plus the interface GUID that `fastboot.exe` needs, driving adb from Docker, and adb over Wi-Fi.
 3. [Unlock and root](docs/03-root.md): the unlock, why v28+ Magisk images fail with `Preflash validation failed`, and the v27.0 route.
 4. [Build host](docs/04-build-host.md): an ext4 VHDX on a spare drive, a Docker volume on the raw device, and a cgroup-capped build container.
 5. [Plan](docs/05-plan.md): why a device build rather than a GSI, the GrapheneOS port survey, and the banking limits.
@@ -44,6 +44,7 @@ build/zram.sh                        compressed RAM swap for the VM, which Andro
 build/keys.sh, build/sign.sh         release keys (on the build disk only) and release signing
 build/soong-prune.py                 generates the device's Soong prune list
 build/debug-sign.sh                  signed DEBUG OTA: the build plus an overlay of extra files
+build/publish.sh                     GitHub release + per-build Updater feed (incremental.sh, feed.py)
 debug/sdlog/                         debug overlay: boot logs to /metadata, copied to the SD card by recovery
 patches/<project>/                   our commits on top of the synced trees (build/apply-patches.sh)
 ```

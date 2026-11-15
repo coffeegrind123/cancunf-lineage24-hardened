@@ -107,7 +107,7 @@ phone: Updater -> raw.githubusercontent.com/.../ota/{incr}.json -> zip URL -> up
 2. Reads the facts from the signed packages themselves (`build/feed.py` checks them): `ro.build.date.utc`, SDK level, security patch, `ro.lineage.releasetype` and version, each zip's size, SHA-256 and `ota-property-files`. It refuses a build that isn't `release-keys`.
 3. Creates release `cancunf-<id>` with the full OTA and the incrementals, then checks GitHub's own SHA-256 of every uploaded asset against ours.
 4. Force-pushes a one-commit `ota` branch with the feed files, and waits until `raw.githubusercontent.com` serves each one identically:
-   - `<source id>.json` for every older build: its incremental, or the full OTA when it is older than the newest `INCR_SOURCES`.
+   - `<source id>.json` for every older build: its incremental, or the full OTA when it is older than the newest `INCR_SOURCES`. An incremental entry also carries `files[0].pre_build_incremental` (its source build), which our Updater patch uses for the label and to block it on any other build; stock LineageOS Updaters ignore the field.
    - `<id>.json` for the new build itself: `[]`, which the Updater shows as no update.
    - `ota.json`: the full OTA, for builds with the fixed URI.
 
@@ -117,6 +117,12 @@ phone: Updater -> raw.githubusercontent.com/.../ota/{incr}.json -> zip URL -> up
 `DRY_RUN=1` makes the incrementals, prints the feed files and publishes nothing.
 
 Measured on build `1794730100` (2026-11-15): each incremental takes about 2.5 minutes to make. From the previous build it was 220 KB (only the feed URI changed); from builds with the camera and secure-element patches missing it was about 6 MB. The phone installed the full OTA by streaming in 11.5 minutes, with nothing stored on `/data`. Uploading a 1.68 GB full OTA takes about 25 minutes on this connection (~1 MB/s).
+
+Incremental install, measured on build `1794738550` over `1794730100` (2026-11-15, no source change between them): the feed `1794730100.json` offered the 215 KB incremental; `update_engine` logged `Detected a 'delta' payload` with `source_slot: A`, fetched one 206,101-byte range (`payload.bin`) through GitHub's redirect, verified the signature against `otacerts.zip` and every target partition by hash, ran postinstall, and reported `Update successfully applied` 52 seconds after tapping Install. That Updater labelled the entry "Full install: Safe to install over any previous build": stock LineageOS maps every installable entry to that string without looking at the package. Updater patch 0001 fixes that from build `1794744737` on. Verified on the phone (2026-11-15):
+
+- **1794738550 -> 1794744737** (the patch itself, 3.26 MB incremental, still shown as "Full install" by the old Updater): delta from slot B, 57 s. The Updater's database migrated from version 4 to 5 on first start and kept its saved entry.
+- **1794744737 -> 1794749579** (211 KB): the patched Updater shows "Incremental update: Installs only over the build running now"; delta from slot A, 58 s. After the reboot it ran on slot B; the snapshot merge finished in 3.4 s.
+- **Wrong source:** importing the incremental from `1794738550` on `1794744737` with "Install local update" shows "Incremental update for a different build; it can't be installed over this one." and offers no Install button. The package's own metadata (`precondition.build_incremental`) supplied the source build.
 
 **Updater on the phone: the LineageOS Updater**, with the feed set by device patch 0018 (`lineage.updater.uri`). Facts from its source that shaped the design:
 

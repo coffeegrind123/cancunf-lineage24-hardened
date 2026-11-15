@@ -42,7 +42,7 @@ Status: open. SD-card installs work around it.
 
 ### Recovery trusts LineageOS's official key
 
-The recovery `otacerts.zip` produced by signing holds our release certificate **and** `vendor/lineage/build/target/product/security/lineage.x509.pem`. LineageOS's releasetools adds it through `extra_recovery_keys`. So recovery accepts any zip signed by official LineageOS, which bypasses our own signing. Status: to be removed in `build/sign.sh` before the next release.
+The recovery `otacerts.zip` produced by signing holds our release certificate **and** `vendor/lineage/build/target/product/security/lineage.x509.pem`. LineageOS's releasetools adds it through `extra_recovery_keys`. So recovery accepts any zip signed by official LineageOS, which bypasses our own signing. Status: **fixed** in `build/sign.sh` (commit `e745086`): it signs from a copy of the target files without `extra_recovery_keys` and fails the release unless every `otacerts.zip` holds only our certificate.
 
 ## The bootloop
 
@@ -54,8 +54,10 @@ Watching the phone's USB IDs from the PC showed the rhythm: `0E8D:2008` (MTP) ap
 
 Two debug builds set `ro.adb.secure=0` and `persist.sys.usb.config=mtp,adb`. Neither enumerated adb:
 
-- With `ro.debuggable=0` (this build's value), init's `update_sys_usb_config()` strips `adb` from `persist.sys.usb.config`.
+- With `ro.debuggable=0`, init's `update_sys_usb_config()` strips `adb` from `persist.sys.usb.config`.
 - More fundamentally, `init.mt6855.usb.rc` sets `sys.usb.configfs 2`, which hands the gadget to the USB gadget HAL, driven by system_server's `UsbDeviceManager`. While system_server crash-loops, it resets the gadget to MTP at every restart, and adb never comes up, whatever the properties say.
+
+`ro.debuggable=0` in a userdebug build is LineageOS's choice, not ours: `vendor/lineage/config/common.mk` sets `PRODUCT_NOT_DEBUGGABLE_IN_USERDEBUG := true` for every non-eng build unless `WITH_ADB_INSECURE` is set. We keep it; it's what stops `adb root` on a release.
 
 pstore can't help either: the kernel has `CONFIG_PSTORE_RAM=y`, but neither the dtb nor dtbo defines a ramoops region, so no kernel log survives a reboot.
 
@@ -115,16 +117,16 @@ Release build `1794655118`, read-only checks with `dumpsys`/`getprop` a few minu
 | Modem | baseband loaded on both slots, `ccci_mdinit` running, `OUT_OF_SERVICE` (no SIM) |
 | IMS | `com.mediatek.ims` plus the `mtkIms` and `telephony_ims` services present; registration needs a SIM |
 
-Found, not yet fixed:
+Found on that build:
 
-- `mtk_secure_element_hal_service` restarts every 5 s: `android.hardware.secure_element@1.2::ISecureElement/SIM1` is missing from the device VINTF manifest, so registration is refused. That affects only UICC secure elements (SIM-based payments, some eSIM functions). Fix: declare the `SIM1`/`SIM2` instances.
+- **Fixed by device patch 0016:** `mtk_secure_element_hal_service` restarted every 5 s: `android.hardware.secure_element@1.2::ISecureElement/SIM1` was missing from the device VINTF manifest, so registration was refused. That affects only UICC secure elements (SIM-based payments, some eSIM functions). Cause: the SKU manifests' empty override for the NXP AIDL eSE came after the SIM declarations and erased them; 0016 puts the override first.
 - SELinux denials, none of which stops a service: Moto's vendor init scripts (block devices, sysfs, vendor props), `system_suspend` reading battery sysfs, and `vendor_init` setting MTK props.
 - Optional `dlopen` misses from the bootloop logs (camera tuning libraries, `sounddose`) still need checking with real use: take photos, play audio.
 
 Hands-on (same day): camera, audio, Wi-Fi and Bluetooth work; fingerprint not tried yet; calls and SIM features need a SIM.
 
 - **GNSS works.** Indoors the engine ran for minutes and heard nothing (NMEA `GGA` with 0 satellites, `measurement_count = 0`). By a window, GPSTest showed GLONASS and BeiDou satellites at about 25 dB-Hz within minutes. The `get consys pinctrl fail` / `eLNA_pin:-1` lines are harmless: `WMT_SOC.cfg` sets `wmt_gps_lna_enable=0` and the GPS driver switches the L1 LNA itself (`gps_lna_pin_ctrl ... select ret = 0`). No location indoors is expected on LineageOS without Google: nothing turns Wi-Fi or cell towers into a position until GmsCompat (phase 2).
-- **Camera HAL crash, open:** `camerahalserver` died once with `SIGSEGV` (`SEGV_ACCERR`) inside Motorola's ArcSoft low-light library `libarcsoft_portrait_super_night_se_raw_lite.so`, on its `SuperNightPlugin` thread. The HAL restarts on its own. It's a closed blob; reproduce it (low light) before looking further.
+- **Camera HAL crash, worked around by device patch 0017:** `camerahalserver` died once with `SIGSEGV` (`SEGV_ACCERR`) inside Motorola's ArcSoft low-light library `libarcsoft_portrait_super_night_se_raw_lite.so`, on its `SuperNightPlugin` thread. The HAL restarts on its own. The blob reads past the end of large buffers and Scudo's guard pages catch it. 0017 preloads `libcamhal_pad` into camerahalserver only, adding 4 KiB of slack to allocations of 64 KiB or more. Night Vision works with it.
 
 ## Updating an installed phone
 
@@ -135,6 +137,6 @@ Measured with build `1794672767` over `1794655118` (2026-11-14), no wipe:
 3. **Install → OK.** `update_engine` writes the inactive slot in the background (about 5 minutes here), verifies every partition by hash, runs postinstall, then reports `Update successfully applied, waiting to reboot`.
 4. Reboot. The phone comes up on the other slot with data intact.
 
-The Updater has no external entry point for a zip (only the system file picker), so without root it can't be started purely from adb. The steps above can be driven over adb with `uiautomator dump` and `input tap` while the phone is unlocked.
+The Updater has no external entry point for a zip (only the system file picker), so without root it can't be started purely from adb. The steps above can be driven over adb with `uiautomator dump` and `input tap` while the phone is unlocked, over USB or over Wi-Fi ([02-windows-fastboot.md](02-windows-fastboot.md#adb-over-wi-fi)).
 
 Release builds get the OTA feed (device patch 0018): a JSON on the repository's `ota` branch, read from `raw.githubusercontent.com` because the Updater's feed client doesn't follow redirects. The zip itself is a GitHub release asset; the Updater's downloader follows that one redirect.
