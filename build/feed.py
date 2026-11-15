@@ -40,19 +40,24 @@ def stream_ranges(props, name):
 
 
 def entry(build, ota, url):
+    file = {
+        "filename": ota["name"],
+        "sha256": ota["sha256"],
+        "size": ota["size"],
+        "url": url,
+        "os_sdk_level": int(build["sdk"]),
+        "os_patch_level": build["patch"],
+        "ota_property_files": ota["props"],
+    }
+    # Our Updater patch labels an entry incremental, and blocks it on any
+    # other installed build, when this is set. Stock Updaters ignore it.
+    if ota["pre"]:
+        file["pre_build_incremental"] = ota["pre"]
     return [{
         "datetime": int(build["datetime"]),
         "type": build["type"],
         "version": build["version"],
-        "files": [{
-            "filename": ota["name"],
-            "sha256": ota["sha256"],
-            "size": ota["size"],
-            "url": url,
-            "os_sdk_level": int(build["sdk"]),
-            "os_patch_level": build["patch"],
-            "ota_property_files": ota["props"],
-        }],
+        "files": [file],
     }]
 
 
