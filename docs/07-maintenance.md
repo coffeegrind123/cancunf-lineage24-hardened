@@ -74,7 +74,7 @@ Run by the agent, after the owner approves the build:
    - Test-keys output is for development only.
 6. **Make the packages:**
    - The full OTA comes from `sign.sh`.
-   - Incrementals from earlier published releases are still to do. Keep every published `*-signed-target_files.zip` on the build disk, because an incremental needs the old one.
+   - Incrementals come from `publish.sh`, which calls `build/incremental.sh <source id> [target id]` for each recent older build. Keep every `*-signed-target_files.zip` on the build disk: an incremental needs the old one, and every build kept there gets a feed file.
 7. **Test on the phone before publishing.**
    - Install over the previous release with the Updater's local import ([09-first-install.md](09-first-install.md#updating-an-installed-phone)): `adb push` the zip to `Download/`, then **Install local update**, **Install**, and reboot.
    - Check over adb: build date and slot, `sys.boot_completed`, no services stuck in `restarting`, crash buffer and `/data/tombstones`.
@@ -93,27 +93,39 @@ Run by the agent, after the owner approves the build:
 What runs today, measured on build `1794688012` (2026-11-14):
 
 ```
-build.sh -> sign.sh -> publish.sh ---> GitHub release cancunf-<build id>   (the OTA zip)
-                                  \--> branch "ota": ota.json               (the feed)
-phone: Updater -> raw.githubusercontent.com/.../ota/ota.json -> zip URL -> update_engine
+build.sh -> sign.sh -> publish.sh ---> GitHub release cancunf-<build id>   (full OTA + incrementals)
+                         |        \--> branch "ota": <id>.json, ota.json    (the feed)
+                  incremental.sh
+phone: Updater -> raw.githubusercontent.com/.../ota/{incr}.json -> zip URL -> update_engine
 ```
+
+`{incr}` is the installed build's `ro.build.version.incremental`, which in our builds is the build id. Builds up to `1794688012` were made with the fixed URI `.../ota/ota.json`, so that file stays and always holds the full OTA.
 
 **`build/publish.sh [build id]`** (defaults to the newest `/lin/release/<id>/`):
 
-1. Reads the facts from the signed package itself: `ro.build.date.utc`, SDK level, security patch, `ro.lineage.releasetype` and version, the zip's size and SHA-256. It refuses a build that isn't `release-keys`.
-2. Creates release `cancunf-<id>` with the OTA zip, then checks GitHub's own SHA-256 of the uploaded asset against ours.
-3. Force-pushes a one-commit `ota` branch holding `ota.json`, and waits until `raw.githubusercontent.com` serves the identical file.
-4. Deletes every older `cancunf-*` release and its tag. Only the latest release is kept on GitHub, and the old ones go only after the new feed is live, so the feed never points at a deleted file.
+1. Finds every older build with signed target files in `/lin/release`. The newest `INCR_SOURCES` (default 3) get an incremental from `build/incremental.sh`, named `lineage-<version>-incr-<source id>-signed.zip`. It keeps an existing one after checking its metadata, and refuses a package whose metadata isn't A/B from that source to this target.
+2. Reads the facts from the signed packages themselves (`build/feed.py` checks them): `ro.build.date.utc`, SDK level, security patch, `ro.lineage.releasetype` and version, each zip's size, SHA-256 and `ota-property-files`. It refuses a build that isn't `release-keys`.
+3. Creates release `cancunf-<id>` with the full OTA and the incrementals, then checks GitHub's own SHA-256 of every uploaded asset against ours.
+4. Force-pushes a one-commit `ota` branch with the feed files, and waits until `raw.githubusercontent.com` serves each one identically:
+   - `<source id>.json` for every older build: its incremental, or the full OTA when it is older than the newest `INCR_SOURCES`.
+   - `<id>.json` for the new build itself: `[]`, which the Updater shows as no update.
+   - `ota.json`: the full OTA, for builds with the fixed URI.
 
-`DRY_RUN=1` prints the feed entry and publishes nothing. Uploading a 1.68 GB full OTA takes about 25 minutes on this connection (~1 MB/s).
+   A build without a file gets HTTP 404, which the Updater shows as an error, so every build that may be on a phone needs its target files kept.
+5. Deletes every older `cancunf-*` release and its tag. Only the latest release is kept on GitHub, and the old ones go only after the new feed is live, so the feed never points at a deleted file.
+
+`DRY_RUN=1` makes the incrementals, prints the feed files and publishes nothing.
+
+Measured on build `1794730100` (2026-11-15): each incremental takes about 2.5 minutes to make. From the previous build it was 220 KB (only the feed URI changed); from builds with the camera and secure-element patches missing it was about 6 MB. The phone installed the full OTA by streaming in 11.5 minutes, with nothing stored on `/data`. Uploading a 1.68 GB full OTA takes about 25 minutes on this connection (~1 MB/s).
 
 **Updater on the phone: the LineageOS Updater**, with the feed set by device patch 0018 (`lineage.updater.uri`). Facts from its source that shaped the design:
 
 - **The feed client doesn't follow redirects** (`followRedirects(false)`), so the feed can't be a release asset or `releases/latest/download/...`, which are both redirects. `raw.githubusercontent.com` answers 200 directly.
 - **The zip download follows one redirect** on the same scheme (`setUseDuplicateLinks(true)`), which is exactly what a GitHub release asset needs (`github.com` → `release-assets.githubusercontent.com`).
-- **Property values are capped at 91 bytes.** `https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/cancunf.json` was 92 and failed the build; `.../ota/ota.json` is 88.
+- **Property values are capped at 91 bytes.** `https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/cancunf.json` was 92 and failed the build; `.../ota/{incr}.json` is exactly 91. A longer repository or branch name doesn't fit.
+- **`{device}`, `{type}` and `{incr}` are replaced in the URI** (`UpdatesNetworkDataSource.kt`). A non-2xx answer is an error, not "no updates".
 - An entry is offered only if its `type` matches `ro.lineage.releasetype` (`UNOFFICIAL`), its `datetime` is newer than the installed `ro.build.date.utc`, and its `os_sdk_level` is not lower. A published build can't be reinstalled by mistake.
-- `ota_property_files` (streaming offsets) is left out, so the Updater downloads, verifies, then installs.
+- **Streaming:** each entry carries `ota_property_files` (the package's `ota-property-files` metadata). With it, and "stream updates" on (the default), the Updater reads `payload_properties.txt` with a range request and has `update_engine` fetch `payload.bin` straight from the release URL, so the zip is never stored on `/data`. Both follow GitHub's redirect: `SingleRangeHttpFetcher` uses OkHttp's default, and `update_engine` sets `CURLOPT_FOLLOWLOCATION` with up to 10 redirects. A range request through the redirect returns 206 (checked with curl, 2026-11-15). Turning streaming off in the Updater's preferences falls back to download, verify, install.
 - Without the property, the Updater contacts `download.lineageos.org`. Builds with patch 0018 no longer do.
 
 **Hosting limits.** GitHub release files must be under 2 GiB. The full OTA is 1.68 GB; growth from GmsCompat, Pixel assets and preloads (phases 2, 7, 10) could cross it, so check every release. The fastboot images zip (2.37 GB) is only needed for a first install and isn't published.

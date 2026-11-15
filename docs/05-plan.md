@@ -98,7 +98,7 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 5. **Calls and SMS end to end** once a SIM is available.
 6. **On-device coding agent with system access.** Details in the section below.
 7. **Preloaded apps:** Titanium Browser and Ovis. Details in the section below.
-8. **OTA updates from GitHub**, with the GrapheneOS Updater (LineageOS Updater as fallback) and a periodic re-port and release procedure. See [07-maintenance.md](07-maintenance.md).
+8. **OTA updates from GitHub**, with the GrapheneOS Updater (LineageOS Updater as fallback) and a periodic re-port and release procedure. Running now with the LineageOS Updater: a per-build feed, incrementals from the three newest older builds, streamed installs. See [07-maintenance.md](07-maintenance.md).
 9. **Our own kernel**: a DragonHeart fork kept current with Google `android12-5.10` and GrapheneOS kernel hardening. See [08-kernel.md](08-kernel.md).
 10. **Pixel look and feel**: Pixel fonts, sounds, clocks, ThemePicker and optionally Pixel Launcher, from PixelOS's Pixel vendor repos. Details in the section below.
 
