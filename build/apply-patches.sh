@@ -19,6 +19,7 @@ declare -A PATHS=(
     [build_make]=build/make
     [build_soong]=build/soong
     [packages_apps_DisplayFeatures]=packages/apps/DisplayFeatures
+    [packages_apps_Updater]=packages/apps/Updater
 )
 
 # Binary edits to vendor blobs. They can't ship as patches because this repo

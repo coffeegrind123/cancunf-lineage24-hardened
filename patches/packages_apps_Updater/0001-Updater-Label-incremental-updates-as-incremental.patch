@@ -1,0 +1,462 @@
+From b732278f2e1a901b074c1052ab8ba70a2e320839 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sun, 15 Nov 2026 12:08:45 +0000
+Subject: [PATCH] Updater: Label incremental updates as incremental
+
+Every installable entry said "Full install: Safe to install over any
+previous build", including incremental packages, which apply only
+over the one build they were made from.
+
+Carry the source build of an incremental in the update: from the
+feed (files[0].pre_build_incremental) or, for an imported package,
+from its metadata precondition. Label such entries as incremental,
+and block one whose source is not the installed build instead of
+letting update_engine fail at the source hash check.
+
+Change-Id: I209c8636a6e5dc3272806f73f56b4bdf7077ad72
+---
+ README.md                                     |   1 +
+ .../org/lineageos/updater/UpdateImporter.java |   1 +
+ .../updater/controller/UpdaterController.java |   1 +
+ .../java/org/lineageos/updater/data/Update.kt |  14 +-
+ .../updater/data/source/local/UpdateEntity.kt |  11 +-
+ .../data/source/local/UpdatesDatabase.kt      |  10 +-
+ .../data/source/network/NetworkUpdate.kt      |   2 +
+ .../updates/action/UpdateActionHandler.kt     |  11 ++
+ .../updates/state/UpdateItemStateMapper.kt    |   5 +-
+ .../lineageos/updater/util/InstallUtils.kt    |   8 +-
+ .../updater/util/OtaMetadataParser.kt         |   3 +
+ app/src/main/res/values/strings.xml           |   3 +
+ .../5.json                                    | 121 ++++++++++++++++++
+ 13 files changed, 181 insertions(+), 10 deletions(-)
+ create mode 100644 schemas/org.lineageos.updater.data.source.local.UpdatesDatabase/5.json
+
+diff --git a/README.md b/README.md
+index fe55146..fd9d0be 100644
+--- a/README.md
++++ b/README.md
+@@ -40,6 +40,7 @@ The `files[0].filename` attribute is the name of the file to be downloaded.
+ The `files[0].os_patch_level` optional attribute is the security patch level of the OTA update.  
+ The `files[0].os_sdk_level` optional attribute is the SDK level of the OTA update.  
+ The `files[0].ota_property_files` optional attribute is the `ota-property-files` value from `META-INF/com/android/metadata` of the OTA update.  
++The `files[0].pre_build_incremental` optional attribute marks an incremental OTA: the `pre-build-incremental` value from its metadata, i.e. the `ro.build.version.incremental` it applies over. Omit it for a full OTA.  
+ The `files[0].sha256` attribute is a sha256 of the OTA update.  
+ The `files[0].size` attribute is the size of the update expressed in bytes.  
+ The `files[0].url` attribute is the URL of the file to be downloaded.  
+diff --git a/app/src/main/java/org/lineageos/updater/UpdateImporter.java b/app/src/main/java/org/lineageos/updater/UpdateImporter.java
+index f63194c..b8d35cc 100644
+--- a/app/src/main/java/org/lineageos/updater/UpdateImporter.java
++++ b/app/src/main/java/org/lineageos/updater/UpdateImporter.java
+@@ -131,6 +131,7 @@ public class UpdateImporter {
+             .setTimestamp(metadata.getTimestamp())
+             .setOsPatchLevel(metadata.getSecurityPatchLevel())
+             .setOsSdkLevel(metadata.getSdkLevel())
++            .setPreBuildIncremental(metadata.getPreBuildIncremental())
+             .setStatus(UpdateStatus.VERIFIED)
+             .setVersion(name)
+             .build();
+diff --git a/app/src/main/java/org/lineageos/updater/controller/UpdaterController.java b/app/src/main/java/org/lineageos/updater/controller/UpdaterController.java
+index 9b85612..341beeb 100644
+--- a/app/src/main/java/org/lineageos/updater/controller/UpdaterController.java
++++ b/app/src/main/java/org/lineageos/updater/controller/UpdaterController.java
+@@ -344,6 +344,7 @@ public class UpdaterController {
+                             .setPayloadSize(updateInfo.getPayloadSize())
+                             .setPayloadPropertiesOffset(updateInfo.getPayloadPropertiesOffset())
+                             .setPayloadPropertiesSize(updateInfo.getPayloadPropertiesSize())
++                            .setPreBuildIncremental(updateInfo.getPreBuildIncremental())
+                             .build();
+                 }
+             }
+diff --git a/app/src/main/java/org/lineageos/updater/data/Update.kt b/app/src/main/java/org/lineageos/updater/data/Update.kt
+index 194dc02..c762de7 100644
+--- a/app/src/main/java/org/lineageos/updater/data/Update.kt
++++ b/app/src/main/java/org/lineageos/updater/data/Update.kt
+@@ -25,6 +25,8 @@ data class Update(
+     val payloadSize: Long? = null,
+     val payloadPropertiesOffset: Long? = null,
+     val payloadPropertiesSize: Long? = null,
++    // Build an incremental package applies to (ro.build.version.incremental); null for a full one.
++    val preBuildIncremental: String? = null,
+     val progress: Int = 0,
+     val speed: Long = 0,
+     val status: UpdateStatus = UpdateStatus.UNKNOWN,
+@@ -43,6 +45,7 @@ data class Update(
+     fun withName(v: String) = copy(name = v)
+     fun withOsPatchLevel(v: String?) = copy(osPatchLevel = v)
+     fun withOsSdkLevel(v: Int) = copy(osSdkLevel = v)
++    fun withPreBuildIncremental(v: String?) = copy(preBuildIncremental = v)
+     fun withProgress(v: Int) = copy(progress = v)
+     fun withSpeed(v: Long) = copy(speed = v)
+     fun withStatus(v: UpdateStatus) = copy(status = v)
+@@ -70,6 +73,7 @@ data class Update(
+         private var payloadSize: Long? = null,
+         private var payloadPropertiesOffset: Long? = null,
+         private var payloadPropertiesSize: Long? = null,
++        private var preBuildIncremental: String? = null,
+         private var progress: Int = 0,
+         private var speed: Long = 0,
+         private var status: UpdateStatus = UpdateStatus.UNKNOWN,
+@@ -83,8 +87,8 @@ data class Update(
+             update.installProgress, update.name, update.osPatchLevel, update.osSdkLevel,
+             update.payloadMetadataOffset, update.payloadMetadataSize, update.payloadOffset,
+             update.payloadSize, update.payloadPropertiesOffset, update.payloadPropertiesSize,
+-            update.progress, update.speed, update.status, update.timestamp, update.type,
+-            update.version,
++            update.preBuildIncremental, update.progress, update.speed, update.status,
++            update.timestamp, update.type, update.version,
+         )
+ 
+         fun setAvailableOnline(v: Boolean) = apply { isAvailableOnline = v }
+@@ -104,6 +108,7 @@ data class Update(
+         fun setPayloadSize(v: Long?) = apply { payloadSize = v }
+         fun setPayloadPropertiesOffset(v: Long?) = apply { payloadPropertiesOffset = v }
+         fun setPayloadPropertiesSize(v: Long?) = apply { payloadPropertiesSize = v }
++        fun setPreBuildIncremental(v: String?) = apply { preBuildIncremental = v }
+         fun setProgress(v: Int) = apply { progress = v }
+         fun setSpeed(v: Long) = apply { speed = v }
+         fun setStatus(v: UpdateStatus) = apply { status = v }
+@@ -114,7 +119,7 @@ data class Update(
+             isAvailableOnline, downloadId, downloadUrl, eta, file, fileSize,
+             isFinalizing, installProgress, name, osPatchLevel, osSdkLevel, payloadMetadataOffset,
+             payloadMetadataSize, payloadOffset, payloadSize, payloadPropertiesOffset,
+-            payloadPropertiesSize, progress, speed, status, timestamp, type, version,
++            payloadPropertiesSize, preBuildIncremental, progress, speed, status, timestamp, type, version,
+         )
+     }
+ 
+@@ -125,6 +130,9 @@ data class Update(
+     fun hasFullyDownloadedPackage(): Boolean =
+         file?.let { it.exists() && fileSize > 0 && it.length() >= fileSize } == true
+ 
++    val isIncremental: Boolean
++        get() = preBuildIncremental != null
++
+     fun hasVerifiedPackage(): Boolean =
+         status.hasVerifiedPackage() && file?.exists() == true
+ 
+diff --git a/app/src/main/java/org/lineageos/updater/data/source/local/UpdateEntity.kt b/app/src/main/java/org/lineageos/updater/data/source/local/UpdateEntity.kt
+index 357694f..4efe535 100644
+--- a/app/src/main/java/org/lineageos/updater/data/source/local/UpdateEntity.kt
++++ b/app/src/main/java/org/lineageos/updater/data/source/local/UpdateEntity.kt
+@@ -70,7 +70,10 @@ data class UpdateEntity(
+     val payloadPropertiesSize: Long?,
+ 
+     @ColumnInfo(name = "download_url")
+-    val downloadUrl: String?
++    val downloadUrl: String?,
++
++    @ColumnInfo(name = "pre_build_incremental")
++    val preBuildIncremental: String?
+ )
+ 
+ fun Update.toEntity() = UpdateEntity(
+@@ -90,7 +93,8 @@ fun Update.toEntity() = UpdateEntity(
+     payloadSize = payloadSize,
+     payloadPropertiesOffset = payloadPropertiesOffset,
+     payloadPropertiesSize = payloadPropertiesSize,
+-    downloadUrl = downloadUrl
++    downloadUrl = downloadUrl,
++    preBuildIncremental = preBuildIncremental
+ )
+ 
+ fun UpdateEntity.toUpdate() = Update(
+@@ -110,5 +114,6 @@ fun UpdateEntity.toUpdate() = Update(
+     payloadSize = payloadSize,
+     payloadPropertiesOffset = payloadPropertiesOffset,
+     payloadPropertiesSize = payloadPropertiesSize,
+-    downloadUrl = downloadUrl
++    downloadUrl = downloadUrl,
++    preBuildIncremental = preBuildIncremental
+ )
+diff --git a/app/src/main/java/org/lineageos/updater/data/source/local/UpdatesDatabase.kt b/app/src/main/java/org/lineageos/updater/data/source/local/UpdatesDatabase.kt
+index 87333b3..1317edb 100644
+--- a/app/src/main/java/org/lineageos/updater/data/source/local/UpdatesDatabase.kt
++++ b/app/src/main/java/org/lineageos/updater/data/source/local/UpdatesDatabase.kt
+@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
+  *
+  * Use [UpdatesLocalDataSource] to interact with data.
+  */
+-@Database(entities = [UpdateEntity::class], version = 4, exportSchema = true)
++@Database(entities = [UpdateEntity::class], version = 5, exportSchema = true)
+ abstract class UpdatesDatabase : RoomDatabase() {
+     abstract fun updateDao(): UpdateDao
+ 
+@@ -76,6 +76,12 @@ abstract class UpdatesDatabase : RoomDatabase() {
+             }
+         }
+ 
++        private val MIGRATION_4_5 = object : Migration(4, 5) {
++            override fun migrate(db: SupportSQLiteDatabase) {
++                db.execSQL("ALTER TABLE `updates` ADD COLUMN `pre_build_incremental` TEXT")
++            }
++        }
++
+         @JvmStatic
+         fun getInstance(context: Context): UpdatesDatabase = instance ?: synchronized(this) {
+             instance ?: Room.databaseBuilder(
+@@ -83,7 +89,7 @@ abstract class UpdatesDatabase : RoomDatabase() {
+                 UpdatesDatabase::class.java,
+                 "updates.db"
+             )
+-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
++                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                 .build()
+                 .also { instance = it }
+         }
+diff --git a/app/src/main/java/org/lineageos/updater/data/source/network/NetworkUpdate.kt b/app/src/main/java/org/lineageos/updater/data/source/network/NetworkUpdate.kt
+index 8e2ff5b..d53291f 100644
+--- a/app/src/main/java/org/lineageos/updater/data/source/network/NetworkUpdate.kt
++++ b/app/src/main/java/org/lineageos/updater/data/source/network/NetworkUpdate.kt
+@@ -39,6 +39,7 @@ data class NetworkUpdateFile(
+     @SerialName("os_patch_level") val osPatchLevel: String? = null,
+     @SerialName("os_sdk_level") val osSdkLevel: Int? = null,
+     @SerialName("ota_property_files") val otaPropertyFiles: String? = null,
++    @SerialName("pre_build_incremental") val preBuildIncremental: String? = null,
+     // @SerialName("sha1") val sha1: String,
+     @SerialName("sha256") val sha256: String,
+     @SerialName("size") val size: Long,
+@@ -83,6 +84,7 @@ fun NetworkUpdate.toUpdate(): Update {
+         payloadSize = payloadRange?.size,
+         payloadPropertiesOffset = payloadPropertiesRange?.offset,
+         payloadPropertiesSize = payloadPropertiesRange?.size,
++        preBuildIncremental = file.preBuildIncremental?.takeIf { it.isNotEmpty() },
+         isAvailableOnline = true,
+     )
+ }
+diff --git a/app/src/main/java/org/lineageos/updater/updates/action/UpdateActionHandler.kt b/app/src/main/java/org/lineageos/updater/updates/action/UpdateActionHandler.kt
+index 8c0ab12..2bd89dc 100644
+--- a/app/src/main/java/org/lineageos/updater/updates/action/UpdateActionHandler.kt
++++ b/app/src/main/java/org/lineageos/updater/updates/action/UpdateActionHandler.kt
+@@ -165,6 +165,17 @@ class UpdateActionHandler(
+                         }
+                     }
+ 
++                    InstallUtils.BlockedReason.WRONG_SOURCE_BUILD -> {
++                        title = activity.getString(R.string.blocked_update_dialog_title)
++                        message = AnnotatedString(
++                            activity.getString(
++                                R.string.blocked_update_dialog_message_wrong_source,
++                                update.preBuildIncremental,
++                                DeviceInfoUtils.buildVersionIncremental,
++                            )
++                        )
++                    }
++
+                     InstallUtils.BlockedReason.NONE -> return
+                 }
+ 
+diff --git a/app/src/main/java/org/lineageos/updater/updates/state/UpdateItemStateMapper.kt b/app/src/main/java/org/lineageos/updater/updates/state/UpdateItemStateMapper.kt
+index 1b97368..065b9bd 100644
+--- a/app/src/main/java/org/lineageos/updater/updates/state/UpdateItemStateMapper.kt
++++ b/app/src/main/java/org/lineageos/updater/updates/state/UpdateItemStateMapper.kt
+@@ -191,7 +191,10 @@ class UpdateItemStateMapper(
+             installNote = when (state.installBlockedReason) {
+                 InstallUtils.BlockedReason.DOWNGRADE -> R.string.list_downgrade_blocked
+                 InstallUtils.BlockedReason.VERSION_UNSUPPORTED -> R.string.list_major_upgrade_recovery_install
+-                InstallUtils.BlockedReason.NONE -> R.string.list_full_install
++                InstallUtils.BlockedReason.WRONG_SOURCE_BUILD -> R.string.list_wrong_source_blocked
++                InstallUtils.BlockedReason.NONE ->
++                    if (update.isIncremental) R.string.list_incremental_install
++                    else R.string.list_full_install
+             },
+             progress = progress,
+             actions = actions,
+diff --git a/app/src/main/java/org/lineageos/updater/util/InstallUtils.kt b/app/src/main/java/org/lineageos/updater/util/InstallUtils.kt
+index 4a0da3c..f6a11b8 100644
+--- a/app/src/main/java/org/lineageos/updater/util/InstallUtils.kt
++++ b/app/src/main/java/org/lineageos/updater/util/InstallUtils.kt
+@@ -18,7 +18,7 @@ object InstallUtils {
+     }.getOrDefault(false)
+ 
+     enum class BlockedReason {
+-        NONE, DOWNGRADE, VERSION_UNSUPPORTED
++        NONE, DOWNGRADE, VERSION_UNSUPPORTED, WRONG_SOURCE_BUILD
+     }
+ 
+     @JvmStatic
+@@ -30,6 +30,12 @@ object InstallUtils {
+         !DeviceInfoUtils.isMajorUpdateAllowed &&
+                 update.osSdkLevel > DeviceInfoUtils.sdkLevel -> BlockedReason.VERSION_UNSUPPORTED
+ 
++        // An incremental only applies over the exact build it was made from;
++        // update_engine would reject it at the source hash check anyway.
++        update.isIncremental &&
++                update.preBuildIncremental != DeviceInfoUtils.buildVersionIncremental ->
++            BlockedReason.WRONG_SOURCE_BUILD
++
+         else -> BlockedReason.NONE
+     }
+ 
+diff --git a/app/src/main/java/org/lineageos/updater/util/OtaMetadataParser.kt b/app/src/main/java/org/lineageos/updater/util/OtaMetadataParser.kt
+index d31fb01..6dd4f0d 100644
+--- a/app/src/main/java/org/lineageos/updater/util/OtaMetadataParser.kt
++++ b/app/src/main/java/org/lineageos/updater/util/OtaMetadataParser.kt
+@@ -15,6 +15,8 @@ class OtaMetadataParser @Throws(IOException::class) constructor(file: File) {
+     val securityPatchLevel: String
+     val timestamp: Long
+     val isABUpdate: Boolean
++    // precondition.build_incremental: set only in incremental packages.
++    val preBuildIncremental: String?
+ 
+     init {
+         val metadata = ZipFile(file).use { readMetadata(it) }
+@@ -29,6 +31,7 @@ class OtaMetadataParser @Throws(IOException::class) constructor(file: File) {
+         sdkLevel = postcondition.sdkLevel.toInt()
+         securityPatchLevel = postcondition.securityPatchLevel
+         timestamp = postcondition.timestamp
++        preBuildIncremental = metadata.precondition?.buildIncremental?.takeIf { it.isNotEmpty() }
+     }
+ 
+     companion object {
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index df56e15..c3a347c 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -132,6 +132,8 @@
+     <string name="list_security_update">Security update: <xliff:g id="date" example="Jan 2026">%1$s</xliff:g></string>
+     <string name="list_major_android_upgrade">Major Android upgrade</string>
+     <string name="list_full_install">Full install: Safe to install over any previous build</string>
++    <string name="list_incremental_install">Incremental update: Installs only over the build running now</string>
++    <string name="list_wrong_source_blocked">Incremental update for a different build; it can\'t be installed over this one.</string>
+     <string name="list_major_upgrade_recovery_install">Major <xliff:g id="brand_name" example="LineageOS">%1$s</xliff:g> version upgrades must be installed manually. Refer to your device\'s guide to continue.</string>
+     <string name="list_downgrade_blocked">This build is older than the installed system and cannot be applied.</string>
+     <string name="list_download_progress_newer"><xliff:g id="filesize_without_unit" example="12.2">%1$s</xliff:g> of <xliff:g id="filesize_without_unit" example="310 MB">%2$s</xliff:g></string>
+@@ -178,6 +180,7 @@
+ 
+     <string name="blocked_update_dialog_title_downgrade">Downgrade blocked</string>
+     <string name="blocked_update_dialog_message_downgrade">This update is older than the current system and cannot be installed.</string>
++    <string name="blocked_update_dialog_message_wrong_source">This incremental update applies only over build <xliff:g id="source_build" example="1794730100">%1$s</xliff:g>. The installed build is <xliff:g id="installed_build" example="1794738550">%2$s</xliff:g>.</string>
+ 
+     <string name="export_channel_title">Export completion</string>
+     <string name="new_updates_channel_title">New updates</string>
+diff --git a/schemas/org.lineageos.updater.data.source.local.UpdatesDatabase/5.json b/schemas/org.lineageos.updater.data.source.local.UpdatesDatabase/5.json
+new file mode 100644
+index 0000000..e53e5a1
+--- /dev/null
++++ b/schemas/org.lineageos.updater.data.source.local.UpdatesDatabase/5.json
+@@ -0,0 +1,121 @@
++{
++  "formatVersion": 1,
++  "database": {
++    "version": 5,
++    "identityHash": "b90b0f2efac3359688b4fce6e818e423",
++    "entities": [
++      {
++        "tableName": "updates",
++        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`download_id` TEXT NOT NULL, `status` INTEGER NOT NULL, `path` TEXT, `timestamp` INTEGER NOT NULL, `type` TEXT, `version` TEXT NOT NULL, `size` INTEGER NOT NULL, `name` TEXT NOT NULL, `os_patch_level` TEXT, `os_sdk_level` INTEGER, `payload_metadata_offset` INTEGER, `payload_metadata_size` INTEGER, `payload_offset` INTEGER, `payload_size` INTEGER, `payload_properties_offset` INTEGER, `payload_properties_size` INTEGER, `download_url` TEXT, `pre_build_incremental` TEXT, PRIMARY KEY(`download_id`))",
++        "fields": [
++          {
++            "fieldPath": "downloadId",
++            "columnName": "download_id",
++            "affinity": "TEXT",
++            "notNull": true
++          },
++          {
++            "fieldPath": "status",
++            "columnName": "status",
++            "affinity": "INTEGER",
++            "notNull": true
++          },
++          {
++            "fieldPath": "path",
++            "columnName": "path",
++            "affinity": "TEXT"
++          },
++          {
++            "fieldPath": "timestamp",
++            "columnName": "timestamp",
++            "affinity": "INTEGER",
++            "notNull": true
++          },
++          {
++            "fieldPath": "type",
++            "columnName": "type",
++            "affinity": "TEXT"
++          },
++          {
++            "fieldPath": "version",
++            "columnName": "version",
++            "affinity": "TEXT",
++            "notNull": true
++          },
++          {
++            "fieldPath": "size",
++            "columnName": "size",
++            "affinity": "INTEGER",
++            "notNull": true
++          },
++          {
++            "fieldPath": "name",
++            "columnName": "name",
++            "affinity": "TEXT",
++            "notNull": true
++          },
++          {
++            "fieldPath": "osPatchLevel",
++            "columnName": "os_patch_level",
++            "affinity": "TEXT"
++          },
++          {
++            "fieldPath": "osSdkLevel",
++            "columnName": "os_sdk_level",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "payloadMetadataOffset",
++            "columnName": "payload_metadata_offset",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "payloadMetadataSize",
++            "columnName": "payload_metadata_size",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "payloadOffset",
++            "columnName": "payload_offset",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "payloadSize",
++            "columnName": "payload_size",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "payloadPropertiesOffset",
++            "columnName": "payload_properties_offset",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "payloadPropertiesSize",
++            "columnName": "payload_properties_size",
++            "affinity": "INTEGER"
++          },
++          {
++            "fieldPath": "downloadUrl",
++            "columnName": "download_url",
++            "affinity": "TEXT"
++          },
++          {
++            "fieldPath": "preBuildIncremental",
++            "columnName": "pre_build_incremental",
++            "affinity": "TEXT"
++          }
++        ],
++        "primaryKey": {
++          "autoGenerate": false,
++          "columnNames": [
++            "download_id"
++          ]
++        }
++      }
++    ],
++    "setupQueries": [
++      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
++      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b90b0f2efac3359688b4fce6e818e423')"
++    ]
++  }
++}
+\ No newline at end of file
+-- 
+2.43.0
+
