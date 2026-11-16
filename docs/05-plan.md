@@ -92,12 +92,15 @@ Because both projects share the same AOSP base, most of these should cherry-pick
    - flash: **done 2026-11-14** from SD card; the phone is on Android 15 firmware (`V1TDS35H.83-20-5-11`), which the owner approved ([09-first-install.md](09-first-install.md)).
    - hardware matrix and IMS service startup: **done without a SIM** ([09-first-install.md](09-first-install.md#first-boot-hardware-check-over-adb-no-sim)). Calls wait for phase 5.
    - restore path: [01-backup.md](01-backup.md)
-2. **GmsCompat port** plus sandboxed Play.
+2. **GmsCompat port** plus sandboxed Play:
+   - port: **done 2026-11-16**, about 100 GrapheneOS commits in 22 projects ([06-gmscompat-port.md](06-gmscompat-port.md)). It runs on the phone: GmsCore starts through the compatibility layer with its config, and the Play Store opens to its sign-in screen.
+   - sandboxed Play, Aurora Store, F-Droid and Titanium Browser installed by AppSetup ([10-appsetup.md](10-appsetup.md)).
+   - still to verify on the phone: Play Store sign-in and an install, FCM push, location through GmsCore, GmsCore not frozen, and the Play Integrity verdict (expected to fail until phase 4).
 3. **Hardening**, one feature per build, each verified on the phone.
 4. **Integrity support** in the framework.
 5. **Calls and SMS end to end** once a SIM is available.
 6. **On-device coding agent with system access.** Details in the section below.
-7. **Preloaded apps:** Titanium Browser and Ovis. Details in the section below.
+7. **Apps outside the image:** Titanium Browser, Termux and Ovis through AppSetup. Details in the section below.
 8. **OTA updates from GitHub**, with the GrapheneOS Updater (LineageOS Updater as fallback) and a periodic re-port and release procedure. Running now with the LineageOS Updater: a per-build feed, incrementals from the three newest older builds, streamed installs. See [07-maintenance.md](07-maintenance.md).
 9. **Our own kernel**: a DragonHeart fork kept current with Google `android12-5.10` and GrapheneOS kernel hardening. See [08-kernel.md](08-kernel.md).
 10. **Pixel look and feel**: Pixel fonts, sounds, clocks, ThemePicker and optionally Pixel Launcher, from PixelOS's Pixel vendor repos. Details in the section below.
@@ -146,20 +149,25 @@ PixelOS's Pixel features are a separate layer of Google binaries extracted from 
 - These are Google's proprietary files. They are pulled into the tree at build time through the local manifest (with `android_vendor_pixel_extract-utils`), and never committed to this repo.
 - Pixel-hardware features (Call Screen, Now Playing, Tensor camera processing) don't work on any non-Pixel phone.
 
-## Preloaded apps
+## Apps outside the image
+
+None of these are in the system image. [AppSetup](10-appsetup.md) installs them on first run and keeps them updated, each pinned to its signing certificate. That keeps the full OTA under GitHub's 2 GiB file limit: Titanium alone is 335 MB.
 
 **[Titanium Browser](https://github.com/jqssun/android-titanium-browser)**
 - About 3.1k stars, GPL-2.0, releases every few days. Chromium, based on GrapheneOS Vanadium, with extension support.
-- Shipped as a prebuilt arm64 APK (about 335 MB) with the author's signature kept (`PRESIGNED`), so its own updates from GitHub or Play keep installing over it.
+- AppSetup installs the arm64 GitHub release with its author's signature, and is its only updater.
 - It replaces the browser only. The system WebView is handled separately in phase 3.
+
+**Termux and Termux:API** (phase 6 needs them)
+- From F-Droid, not GitHub. Termux's GitHub builds are signed with a test key whose private half is public in termux-app, so a pin on it would protect nothing, and any app signed with it could join Termux's shared `com.termux` UID. The phase 6 bridge plans to trust that UID.
 
 **[Ovis](https://github.com/devswha/ovis)**
 - About 1.9k stars, MIT. A chat and terminal client for [herdr](https://github.com/herdrdev/herdr), a Rust runtime that hosts coding agents, including pi, in panes.
 - Designed for a PC-side server with the phone as a remote client.
-- The Android app (`sh.ovis.app`, Capacitor, in `app/android`) is only a Play Store beta with no APK release, so we **build it from source** into the ROM. Signed with our key, it is updated with the ROM rather than from Play.
+- The Android app (`sh.ovis.app`, Capacitor, in `app/android`) is only a Play Store beta with no APK release, so we **build it from source**, sign it with our own key, publish it as a release asset of this repo, and add it to AppSetup pinned to that key.
 
 Running Ovis against an agent **on the phone** has two unsupported pieces:
 - herdr's installer deliberately rejects Android. Its Linux arm64 binary was reported working in F-Droid Termux at v0.8.2 ([herdr #3857](https://github.com/herdrdev/herdr/issues/3857)), but not officially.
 - The Ovis server is Bun, which has no native Android/bionic build.
 
-The planned route is herdr plus the Ovis server inside a proot Debian in Termux, with the Ovis app connecting to `localhost:7317`. The same app also reaches pi on a PC. Both are unverified on Android 17 until tested on the phone.
+The planned route is herdr plus the Ovis server inside a proot Debian in Termux, with the Ovis app connecting to `localhost:7317`. AppSetup can start that setup in Termux through its `RUN_COMMAND` intent once Termux is installed. The same app also reaches pi on a PC. Both are unverified on Android 17 until tested on the phone.

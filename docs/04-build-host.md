@@ -69,6 +69,7 @@ Always set:
 - **soong:** forward `GOMEMLIMIT`, `GOGC` and `GODEBUG` to `soong_build`, which otherwise runs with an empty environment.
 - **soong:** give the KSP client kotlinc's 8 GB heap. The JVM default inside the cgroup, a quarter of 8 GiB, ran out on SystemUI.
 - **make:** `DISABLE_HOST_CROSS_WINDOWS=true` drops the Windows host variants.
+- **soong:** give metalava a 4 GiB heap. With the JVM default (a quarter of the container cap) the API stubs ran out of heap once the GmsCompat port added system APIs.
 
 **Pruning.** [`build/soong-prune.py`](../build/soong-prune.py) writes the device's `soong-prune.mk` (`PRODUCT_SOURCE_ROOT_DIRS`). It skips CTS, automotive, Qualcomm and test trees, splitting directories until nothing kept still references a pruned module. Three things to know about blueprint's matching:
 - Prefixes are plain string prefixes, so directories need a trailing slash.
@@ -110,9 +111,11 @@ Later patches fix what the first installs found on the phone, or add features:
 |---|---|
 | device 0015 | export the `pixelstats` Soong namespace: `pixelatoms-cpp.so` was linked against but never installed, and the thermal HAL failed to load ([09-first-install.md](09-first-install.md)) |
 | device 0016 | keep the UICC secure-element HAL instances in the SKU manifests; an empty override erased them |
-| device 0017 | preload `libcamhal_pad` into camerahalserver: Motorola's ArcSoft low-light blob reads past large buffers |
+| device 0017, 0019, 0021, vendor 0005 | `libcamhal_pad` pads large allocations in camerahalserver, because Motorola's ArcSoft low-light blob reads past large buffers. 0017 preloaded it, which never took effect (AT_SECURE strips `LD_PRELOAD`); 0019 and vendor 0005 link it as the blob's first `DT_NEEDED`; 0021 makes it `DF_1_GLOBAL` so the dlopened blob binds to it ([09-first-install.md](09-first-install.md)) |
 | device 0018 | `lineage.updater.uri` points the Updater at our per-build feed ([07-maintenance.md](07-maintenance.md#ota-delivery-from-github)) |
 | Updater 0001 | label incremental entries as incremental and block one made from another build; the stock Updater called every entry "Full install" |
+| device 0020, 0022 | AppSetup: first-run installer and updater for sandboxed Google Play, Aurora Store, F-Droid, Termux, Termux:API and Titanium Browser, each pinned to its signing certificate ([10-appsetup.md](10-appsetup.md)) |
+| GmsCompat port | phase 2: about 100 GrapheneOS commits in 22 projects plus the GmsCompat, LogViewer and config apps ([06-gmscompat-port.md](06-gmscompat-port.md)) |
 
 Binary edits to vendor blobs (renames, `patchelf`) are not stored as patches, because this repo carries no proprietary files. `apply-patches.sh` performs them after the vendor patches, matching what `extract-files.py` would now produce. `BRANCH=<name>` lets a scratch worktree verify the series without moving the live branch: the whole series reproduces the built trees byte for byte.
 

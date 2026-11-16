@@ -67,10 +67,16 @@ Run by the agent, after the owner approves the build:
    - New hardening: judge each one against this hardware (Pixel-only changes are skipped).
    - If GrapheneOS rebased onto a new AOSP tag (`android-17.0.0_rN`), re-check the base with the same `ls-remote` method used in the survey.
    - Update `ported.json` with the new heads.
+   - Run `build/gmscompat-config-check.py` in the build container. Every class and method the synced GmsCompatConfig names must exist, or GmsCompat rejects its config on our userdebug build and can't start ([06-gmscompat-port.md](06-gmscompat-port.md)).
 5. **Build and sign.**
    - `build/zram.sh on` (after any VM restart; check with `build/zram.sh status`).
    - `TARGET=target-files-package build/build.sh`. Analysis needs about 8 GB of RAM plus up to ~9 GiB of compressed zram pool (default cap 10G); see "Build host memory" below.
+     - Launch it detached (`setsid nohup build/build.sh > log 2>&1 < /dev/null &`) when the caller may be killed: `docker run` forwards a signal to its parent into the build container, so a build can die with its shell.
+     - `MFLAGS=-k` keeps going after the first error, so one run lists every compile error.
+     - With other containers running, `MEM=7680m JOBS=3` stays under the VM guard; the default 8 GiB tripped it on 2026-11-16.
+   - If `build/make/tools/releasetools` changed (a patch to `sign_target_files_apks.py`, for example), run `TARGET=otatools build/build.sh` first. `target-files-package` doesn't rebuild the host signing tools, so `sign.sh` would silently use the old ones: on 2026-11-16 that left `GmsCompatLib.apk` signed with the in-tree dev key.
    - `build/sign.sh`. It fails the release unless every `otacerts.zip` holds only our release certificate.
+   - Check that no APK kept a dev key: `grep 'signing:' <sign log> | grep -v /lin/keys` must list nothing (`NOT signing:` lines are prebuilts that keep their own signatures).
    - Test-keys output is for development only.
 6. **Make the packages:**
    - The full OTA comes from `sign.sh`.

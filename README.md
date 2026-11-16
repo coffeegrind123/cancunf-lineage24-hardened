@@ -10,12 +10,12 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Build host on Windows/WSL2 with a hard memory cap | done; Android 17 analysis runs with zram, see [docs/04-build-host.md](docs/04-build-host.md) |
 | Plain LineageOS 24 for cancunf | done: release-signed builds run on the phone; hardware checked without a SIM (sensors, cameras, Wi-Fi, BT, NFC, GNSS, audio, modem). The first build bootlooped on a missing thermal-HAL library, fixed by device patch 0015; see [docs/09-first-install.md](docs/09-first-install.md). Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
 | Release keys and signing | done: [`build/keys.sh`](build/keys.sh), [`build/sign.sh`](build/sign.sh); keys stay on the build disk |
-| GrapheneOS GmsCompat (sandboxed Google Play) | planned (phase 2) |
+| GrapheneOS GmsCompat (sandboxed Google Play) | ported and running: GmsCore runs sandboxed, the Play Store opens. Sign-in, FCM and location checks still to do. [docs/06-gmscompat-port.md](docs/06-gmscompat-port.md) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
 | Root-free Play Integrity support | planned (phase 4) |
 | VoLTE calls / SMS | phase 5. No SIM yet, so only the no-SIM half can be verified |
 | pi coding agent with system access (privileged bridge, Computer Control) | planned (phase 6) |
-| Preloaded Titanium Browser and Ovis | planned (phase 7) |
+| Apps outside the image (sandboxed Play, Aurora Store, F-Droid, Termux, Titanium Browser; later Ovis) | AppSetup installs and updates them, each pinned to its signing certificate: [docs/10-appsetup.md](docs/10-appsetup.md) |
 | OTA updates from GitHub releases, periodic re-port | running with the LineageOS Updater: per-build feed, incrementals from the three newest older builds, streamed installs, both full and incremental verified on the phone. GrapheneOS Updater optional later. Runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
 | Pixel look and feel (fonts, sounds, clocks, ThemePicker, optional Pixel Launcher) from PixelOS's Pixel repos | planned (phase 10) |
 | Own kernel ([fork](https://github.com/coffeegrind123/kernel_motorola_cancunf)): Google `android12-5.10` fixes plus GrapheneOS hardening | planned (phase 9), [docs/08-kernel.md](docs/08-kernel.md) |
@@ -27,10 +27,11 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 3. [Unlock and root](docs/03-root.md): the unlock, why v28+ Magisk images fail with `Preflash validation failed`, and the v27.0 route.
 4. [Build host](docs/04-build-host.md): an ext4 VHDX on a spare drive, a Docker volume on the raw device, and a cgroup-capped build container.
 5. [Plan](docs/05-plan.md): why a device build rather than a GSI, the GrapheneOS port survey, and the banking limits.
-6. [GmsCompat port](docs/06-gmscompat-port.md): commit order and prerequisites for porting GrapheneOS's sandboxed Google Play.
+6. [GmsCompat port](docs/06-gmscompat-port.md): what was ported from GrapheneOS for sandboxed Google Play, how the commit list was found, and every adaptation.
 7. [Maintenance](docs/07-maintenance.md): which layers get security fixes and from where, release keys, the periodic update procedure, and OTA delivery from GitHub.
 8. [Kernel](docs/08-kernel.md): our DragonHeart-based kernel, how GrapheneOS's 93 kernel hardening commits sort for 5.10, and the per-release kernel procedure.
 9. [First install](docs/09-first-install.md): the install route that worked (SD card, not sideload), open recovery issues, and how the bootloop was diagnosed without adb.
+10. [AppSetup](docs/10-appsetup.md): the first-run installer and updater, its sources and pinned signing certificates.
 
 ## Layout
 
