@@ -1,0 +1,1503 @@
+From 69b29a483d1df42745358d4dd872cee2d7334daf Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 12:59:39 +0000
+Subject: [PATCH] cancunf: Add AppSetup, a first-run installer and updater
+
+Installs and updates apps that ship outside the image: sandboxed
+Google Play (GmsCore and the Play Store, from GrapheneOS's signed app
+index), Aurora Store, F-Droid and Titanium Browser. Keeping them out of
+the image keeps the OTA under GitHub's 2 GiB limit (Titanium alone is
+335 MB) and lets each update on its own schedule.
+
+Every download must be signed by a pinned certificate before it is
+installed, whatever server served it; the GrapheneOS index must carry
+a valid Ed25519 signature from its pinned key and may not be older
+than one already seen; downgrades are refused. It is a priv-app with
+INSTALL_PACKAGES, so one tap installs everything, and a daily job on
+unmetered networks updates the apps that are installed.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ apps/AppSetup/Android.bp                      |  24 ++
+ apps/AppSetup/AndroidManifest.xml             |  43 ++++
+ .../AppSetup/privapp-permissions-appsetup.xml |   6 +
+ apps/AppSetup/res/values/strings.xml          |  10 +
+ .../cancunf/appsetup/AuroraFeedSource.java    |  38 ++++
+ .../app/cancunf/appsetup/BootReceiver.java    |  16 ++
+ .../src/app/cancunf/appsetup/Catalog.java     |  65 ++++++
+ .../src/app/cancunf/appsetup/Engine.java      | 134 +++++++++++
+ .../app/cancunf/appsetup/FDroidSource.java    |  40 ++++
+ .../cancunf/appsetup/GitHubReleaseSource.java |  56 +++++
+ .../cancunf/appsetup/GrapheneRepoSource.java  | 212 ++++++++++++++++++
+ .../src/app/cancunf/appsetup/Http.java        | 145 ++++++++++++
+ .../src/app/cancunf/appsetup/Installer.java   |  97 ++++++++
+ .../app/cancunf/appsetup/MainActivity.java    | 126 +++++++++++
+ .../src/app/cancunf/appsetup/Release.java     |  43 ++++
+ .../src/app/cancunf/appsetup/RunState.java    | 103 +++++++++
+ .../src/app/cancunf/appsetup/Source.java      |  16 ++
+ .../cancunf/appsetup/UpdateJobService.java    |  52 +++++
+ .../src/app/cancunf/appsetup/Util.java        |  30 +++
+ .../src/app/cancunf/appsetup/Verifier.java    |  49 ++++
+ device.mk                                     |   4 +
+ 21 files changed, 1309 insertions(+)
+ create mode 100644 apps/AppSetup/Android.bp
+ create mode 100644 apps/AppSetup/AndroidManifest.xml
+ create mode 100644 apps/AppSetup/privapp-permissions-appsetup.xml
+ create mode 100644 apps/AppSetup/res/values/strings.xml
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/AuroraFeedSource.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/BootReceiver.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Catalog.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Engine.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/GitHubReleaseSource.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/GrapheneRepoSource.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Http.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Installer.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/MainActivity.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Release.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/RunState.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Source.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/UpdateJobService.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Util.java
+ create mode 100644 apps/AppSetup/src/app/cancunf/appsetup/Verifier.java
+
+diff --git a/apps/AppSetup/Android.bp b/apps/AppSetup/Android.bp
+new file mode 100644
+index 0000000..314b734
+--- /dev/null
++++ b/apps/AppSetup/Android.bp
+@@ -0,0 +1,24 @@
++// First-run installer and updater for apps that ship outside the image:
++// sandboxed Google Play (from GrapheneOS's app repository), Aurora Store,
++// F-Droid and Titanium Browser. Every download must be signed by a pinned
++// certificate (Catalog.java) before it is installed.
++android_app {
++    name: "AppSetup",
++    srcs: ["src/**/*.java"],
++    resource_dirs: ["res"],
++    manifest: "AndroidManifest.xml",
++    platform_apis: true,
++    privileged: true,
++    system_ext_specific: true,
++    required: ["privapp-permissions-appsetup.xml"],
++    optimize: {
++        enabled: false,
++    },
++}
++
++prebuilt_etc {
++    name: "privapp-permissions-appsetup.xml",
++    src: "privapp-permissions-appsetup.xml",
++    sub_dir: "permissions",
++    system_ext_specific: true,
++}
+diff --git a/apps/AppSetup/AndroidManifest.xml b/apps/AppSetup/AndroidManifest.xml
+new file mode 100644
+index 0000000..a28f1d4
+--- /dev/null
++++ b/apps/AppSetup/AndroidManifest.xml
+@@ -0,0 +1,43 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="app.cancunf.appsetup">
++
++    <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <!-- Silent installs and updates; granted by privapp-permissions-appsetup.xml. -->
++    <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
++    <!-- Keeps the daily update job across reboots. -->
++    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++    <!-- Reads installed versions of the managed apps. -->
++    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
++
++    <application
++        android:label="@string/app_name"
++        android:icon="@android:drawable/stat_sys_download_done"
++        android:allowBackup="false"
++        android:usesCleartextTraffic="false">
++
++        <activity
++            android:name=".MainActivity"
++            android:exported="true"
++            android:launchMode="singleTask">
++            <intent-filter>
++                <action android:name="android.intent.action.MAIN" />
++                <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter>
++        </activity>
++
++        <service
++            android:name=".UpdateJobService"
++            android:exported="false"
++            android:permission="android.permission.BIND_JOB_SERVICE" />
++
++        <receiver
++            android:name=".BootReceiver"
++            android:exported="false">
++            <intent-filter>
++                <action android:name="android.intent.action.BOOT_COMPLETED" />
++            </intent-filter>
++        </receiver>
++    </application>
++</manifest>
+diff --git a/apps/AppSetup/privapp-permissions-appsetup.xml b/apps/AppSetup/privapp-permissions-appsetup.xml
+new file mode 100644
+index 0000000..aec4014
+--- /dev/null
++++ b/apps/AppSetup/privapp-permissions-appsetup.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<permissions>
++    <privapp-permissions package="app.cancunf.appsetup">
++        <permission name="android.permission.INSTALL_PACKAGES" />
++    </privapp-permissions>
++</permissions>
+diff --git a/apps/AppSetup/res/values/strings.xml b/apps/AppSetup/res/values/strings.xml
+new file mode 100644
+index 0000000..f1104b3
+--- /dev/null
++++ b/apps/AppSetup/res/values/strings.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">App Setup</string>
++    <string name="intro">Installs these apps from their official sources. Each download must be signed by its developer\'s known key before it is installed. Installed apps are checked for updates once a day on Wi-Fi.</string>
++    <string name="install_selected">Install selected</string>
++    <string name="check_updates">Check for updates</string>
++    <string name="working">Working…</string>
++    <string name="not_installed">Not installed</string>
++    <string name="installed_version">Installed: %1$s</string>
++</resources>
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/AuroraFeedSource.java b/apps/AppSetup/src/app/cancunf/appsetup/AuroraFeedSource.java
+new file mode 100644
+index 0000000..dd2fd5b
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/AuroraFeedSource.java
+@@ -0,0 +1,38 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++import android.net.Uri;
++
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++import java.util.List;
++import java.util.Set;
++
++/** Aurora Store from the release feed Aurora itself uses for self-updates. */
++final class AuroraFeedSource implements Source {
++
++    private static final String FEED_URL = "https://auroraoss.com/downloads/AuroraStore/Feeds/release_feed.json";
++    private static final Set<String> HOSTS = Set.of("auroraoss.com", "www.auroraoss.com");
++
++    @Override
++    public Release latest(Context ctx, RunState run) throws IOException {
++        byte[] body = Http.get(FEED_URL, Http.METADATA_MAX, "application/json");
++        try {
++            JSONObject f = new JSONObject(new String(body, StandardCharsets.UTF_8));
++            String url = f.getString("download_url");
++            Uri u = Uri.parse(url);
++            if (!"https".equals(u.getScheme()) || !HOSTS.contains(u.getHost())) {
++                throw new IOException("Aurora feed points outside auroraoss.com: " + url);
++            }
++            long vc = Long.parseLong(f.getString("version_code").trim());
++            long size = Long.parseLong(f.getString("size").trim());
++            return new Release(Catalog.AURORA, vc, f.getString("version_name"),
++                    List.of(new Release.Part("base.apk", url, null, size)));
++        } catch (JSONException | NumberFormatException e) {
++            throw new IOException("malformed Aurora feed", e);
++        }
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/BootReceiver.java b/apps/AppSetup/src/app/cancunf/appsetup/BootReceiver.java
+new file mode 100644
+index 0000000..0c539f7
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/BootReceiver.java
+@@ -0,0 +1,16 @@
++package app.cancunf.appsetup;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++
++/** Schedules the daily update check, so it runs even if the app was never opened. */
++public class BootReceiver extends BroadcastReceiver {
++
++    @Override
++    public void onReceive(Context ctx, Intent intent) {
++        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
++            UpdateJobService.schedule(ctx);
++        }
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java b/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java
+new file mode 100644
+index 0000000..460e858
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java
+@@ -0,0 +1,65 @@
++package app.cancunf.appsetup;
++
++import java.util.List;
++import java.util.Set;
++
++/**
++ * The managed apps and the signing certificates each one must carry.
++ *
++ * A pin is the SHA-256 of the APK's current signing certificate. They were read
++ * from the released APKs on 2026-11-16 and cross-checked: Aurora's against its
++ * README, F-Droid's against its long-published fingerprint, Titanium's against
++ * an older release (same key since at least June 2026), Google's against
++ * GrapheneOS's signed app index. A download signed by anything else is never
++ * installed, whichever server served it.
++ */
++final class Catalog {
++
++    static final String GMS = "com.google.android.gms";
++    static final String PLAY_STORE = "com.android.vending";
++    static final String AURORA = "com.aurora.store";
++    static final String FDROID = "org.fdroid.fdroid";
++    static final String TITANIUM = "io.github.jqssun.helium";
++
++    // Google's app signing key, and GmsCore's rotated key (GmsCore is signed by the
++    // second with the first in its rotation lineage).
++    private static final String GOOGLE = "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053";
++    private static final String GOOGLE_GMS_ROTATED = "5f2391277b1dbd489000467e4c2fa6af802430080457dce2f618992e9dfb5402";
++
++    static final class App {
++        final String pkg;
++        final String label;
++        final Source source;
++        final Set<String> certs;
++        /** Must be installed (by us or otherwise) before this one is attempted. */
++        final String requires;
++
++        App(String pkg, String label, Source source, Set<String> certs, String requires) {
++            this.pkg = pkg;
++            this.label = label;
++            this.source = source;
++            this.certs = certs;
++            this.requires = requires;
++        }
++    }
++
++    /** Install order matters: GmsCore before the Play Store. */
++    static List<App> apps() {
++        return List.of(
++                new App(GMS, "Google Play services (sandboxed)",
++                        new GrapheneRepoSource(GMS), Set.of(GOOGLE, GOOGLE_GMS_ROTATED), null),
++                new App(PLAY_STORE, "Google Play Store (sandboxed)",
++                        new GrapheneRepoSource(PLAY_STORE), Set.of(GOOGLE), GMS),
++                new App(AURORA, "Aurora Store",
++                        new AuroraFeedSource(),
++                        Set.of("4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f"), null),
++                new App(FDROID, "F-Droid",
++                        new FDroidSource(),
++                        Set.of("43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"), null),
++                new App(TITANIUM, "Titanium Browser",
++                        new GitHubReleaseSource(TITANIUM, "jqssun/android-titanium-browser"),
++                        Set.of("095540494d53f48ca051bc86c392c46edb29725da5592bd8af3c3d027b3166bb"), null));
++    }
++
++    private Catalog() {}
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Engine.java b/apps/AppSetup/src/app/cancunf/appsetup/Engine.java
+new file mode 100644
+index 0000000..00542cd
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Engine.java
+@@ -0,0 +1,134 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++import android.content.pm.PackageInfo;
++import android.content.pm.PackageManager;
++import android.util.Log;
++
++import java.io.File;
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.Collection;
++import java.util.List;
++
++/**
++ * Resolves, downloads, verifies and installs. One app's failure never stops
++ * the others; nothing is installed unless it passed Verifier and is newer than
++ * what is installed (no downgrades, whatever a source says).
++ */
++final class Engine {
++
++    private static final String TAG = "AppSetup";
++    // Ceiling for one APK when the source states no size (F-Droid).
++    private static final long DEFAULT_MAX_APK = 512L * 1024 * 1024;
++
++    interface Listener {
++        void onStatus(String pkg, String status);
++    }
++
++    enum Mode {
++        /** Install the given apps if missing, update them if installed. */
++        INSTALL,
++        /** Update installed apps only; never install a missing one. */
++        UPDATE_ONLY,
++    }
++
++    static void run(Context ctx, Collection<Catalog.App> apps, Mode mode, Listener l) {
++        PackageManager pm = ctx.getPackageManager();
++        RunState state = new RunState(ctx);
++        for (Catalog.App app : apps) {
++            try {
++                String result = runOne(ctx, pm, state, app, mode, l);
++                report(l, app.pkg, result);
++            } catch (IOException | RuntimeException e) {
++                Log.w(TAG, app.pkg + ": " + e.getMessage(), e);
++                report(l, app.pkg, "Failed: " + e.getMessage());
++            }
++        }
++    }
++
++    private static String runOne(Context ctx, PackageManager pm, RunState state, Catalog.App app, Mode mode,
++            Listener l) throws IOException {
++        PackageInfo installed = Util.installed(pm, app.pkg);
++        if (installed == null && mode == Mode.UPDATE_ONLY) {
++            return "Not installed";
++        }
++        if (app.requires != null && Util.installed(pm, app.requires) == null) {
++            return "Skipped: needs " + app.requires + " first";
++        }
++
++        report(l, app.pkg, "Checking…");
++        Release r = app.source.latest(ctx, state);
++        if (r == null) {
++            return "No release for this device";
++        }
++        if (installed != null && upToDate(installed, r)) {
++            return "Up to date (" + installed.versionName + ")";
++        }
++
++        File dir = new File(ctx.getCacheDir(), app.pkg);
++        deleteTree(dir);
++        if (!dir.mkdirs()) {
++            throw new IOException("cannot create " + dir);
++        }
++        try {
++            List<File> files = new ArrayList<>();
++            for (int i = 0; i < r.parts.size(); i++) {
++                Release.Part p = r.parts.get(i);
++                File f = new File(dir, i == 0 ? "base.apk" : p.name);
++                long max = p.size > 0 ? p.size : DEFAULT_MAX_APK;
++                String label = r.parts.size() > 1 ? " (" + (i + 1) + "/" + r.parts.size() + ")" : "";
++                long[] lastPercent = {-1};
++                Http.download(p.url, f, max, p.size, p.sha256, (done, total) -> {
++                    long percent = total > 0 ? done * 100 / total : -1;
++                    if (percent >= 0 && percent != lastPercent[0]) {
++                        lastPercent[0] = percent;
++                        report(l, app.pkg, "Downloading " + r.versionName + label + ": " + percent + "%");
++                    }
++                });
++                files.add(f);
++            }
++
++            long vc = Verifier.check(pm, files.get(0), app.pkg, app.certs, r.versionCode);
++            if (installed != null && installed.getLongVersionCode() >= vc) {
++                return "Up to date (" + installed.versionName + ")";
++            }
++
++            report(l, app.pkg, "Installing " + r.versionName + "…");
++            Installer.install(ctx, app.pkg, files);
++            Log.i(TAG, app.pkg + ": installed " + r.versionName + " (" + vc + ")");
++            return "Installed " + r.versionName;
++        } finally {
++            deleteTree(dir);
++        }
++    }
++
++    /** True when the installed version is at least the release's. */
++    private static boolean upToDate(PackageInfo installed, Release r) {
++        if (r.versionCode != Release.UNKNOWN) {
++            return installed.getLongVersionCode() >= r.versionCode;
++        }
++        // Only a version name is known before downloading (GitHub). Equal names
++        // skip the download; anything else is downloaded and the version code
++        // compared after verification.
++        return r.versionName.equals(installed.versionName);
++    }
++
++    private static void report(Listener l, String pkg, String status) {
++        if (l != null) {
++            l.onStatus(pkg, status);
++        }
++    }
++
++    private static void deleteTree(File f) {
++        File[] children = f.listFiles();
++        if (children != null) {
++            for (File c : children) {
++                deleteTree(c);
++            }
++        }
++        f.delete();
++    }
++
++    private Engine() {}
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java b/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java
+new file mode 100644
+index 0000000..e1b17f0
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java
+@@ -0,0 +1,40 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++import java.util.List;
++
++/** The F-Droid client from f-droid.org's own repository. */
++final class FDroidSource implements Source {
++
++    private static final String API_URL = "https://f-droid.org/api/v1/packages/" + Catalog.FDROID;
++    private static final String REPO_URL = "https://f-droid.org/repo/";
++
++    @Override
++    public Release latest(Context ctx, RunState run) throws IOException {
++        byte[] body = Http.get(API_URL, Http.METADATA_MAX, "application/json");
++        try {
++            JSONObject o = new JSONObject(new String(body, StandardCharsets.UTF_8));
++            long vc = o.getLong("suggestedVersionCode");
++            String name = String.valueOf(vc);
++            JSONArray versions = o.optJSONArray("packages");
++            for (int i = 0; versions != null && i < versions.length(); i++) {
++                JSONObject v = versions.getJSONObject(i);
++                if (v.getLong("versionCode") == vc) {
++                    name = v.getString("versionName");
++                }
++            }
++            String file = Catalog.FDROID + "_" + vc + ".apk";
++            return new Release(Catalog.FDROID, vc, name,
++                    List.of(new Release.Part("base.apk", REPO_URL + file, null, Release.UNKNOWN)));
++        } catch (JSONException e) {
++            throw new IOException("malformed F-Droid API response", e);
++        }
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/GitHubReleaseSource.java b/apps/AppSetup/src/app/cancunf/appsetup/GitHubReleaseSource.java
+new file mode 100644
+index 0000000..95a7a19
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/GitHubReleaseSource.java
+@@ -0,0 +1,56 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++import android.os.Build;
++
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++import java.util.List;
++
++/**
++ * The newest GitHub release of a repository, choosing the asset built for this
++ * device's ABI ("...-arm64-v8a.apk"). GitHub reports each asset's SHA-256.
++ */
++final class GitHubReleaseSource implements Source {
++
++    private static final String API = "https://api.github.com/repos/";
++    private static final String DIGEST_PREFIX = "sha256:";
++
++    private final String pkg;
++    private final String repo;
++
++    GitHubReleaseSource(String pkg, String repo) {
++        this.pkg = pkg;
++        this.repo = repo;
++    }
++
++    @Override
++    public Release latest(Context ctx, RunState run) throws IOException {
++        byte[] body = Http.get(API + repo + "/releases/latest", Http.METADATA_MAX, "application/vnd.github+json");
++        try {
++            JSONObject r = new JSONObject(new String(body, StandardCharsets.UTF_8));
++            String tag = r.getString("tag_name");
++            String version = tag.startsWith("v") ? tag.substring(1) : tag;
++            String suffix = "-" + Build.SUPPORTED_ABIS[0] + ".apk";
++            JSONArray assets = r.getJSONArray("assets");
++            for (int i = 0; i < assets.length(); i++) {
++                JSONObject a = assets.getJSONObject(i);
++                if (!a.getString("name").endsWith(suffix)) {
++                    continue;
++                }
++                String digest = a.optString("digest", "");
++                String sha = digest.startsWith(DIGEST_PREFIX) ? digest.substring(DIGEST_PREFIX.length()) : null;
++                return new Release(pkg, Release.UNKNOWN, version,
++                        List.of(new Release.Part("base.apk", a.getString("browser_download_url"),
++                                sha, a.getLong("size"))));
++            }
++            return null;
++        } catch (JSONException e) {
++            throw new IOException("malformed GitHub release for " + repo, e);
++        }
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/GrapheneRepoSource.java b/apps/AppSetup/src/app/cancunf/appsetup/GrapheneRepoSource.java
+new file mode 100644
+index 0000000..0096be5
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/GrapheneRepoSource.java
+@@ -0,0 +1,212 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++import android.content.pm.PackageInfo;
++import android.os.Build;
++import android.os.LocaleList;
++
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.HashSet;
++import java.util.Iterator;
++import java.util.List;
++import java.util.Set;
++
++/**
++ * Sandboxed Google Play packages from GrapheneOS's app repository: Google's
++ * own signed APKs, listed in an index GrapheneOS signs. Variant and split
++ * choice follows what GrapheneOS's App Store client does for this device.
++ */
++final class GrapheneRepoSource implements Source {
++
++    private static final String PACKAGES_URL = "https://apps.grapheneos.org/packages/";
++    private static final String ANDROID_DEP = "android";
++
++    private static final String[] DENSITY_NAMES = {"ldpi", "mdpi", "tvdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"};
++    private static final int[] DENSITY_DPI = {120, 160, 213, 240, 320, 480, 640};
++
++    private final String pkg;
++
++    GrapheneRepoSource(String pkg) {
++        this.pkg = pkg;
++    }
++
++    @Override
++    public Release latest(Context ctx, RunState run) throws IOException {
++        try {
++            JSONObject p = run.grapheneIndex().getJSONObject("packages").optJSONObject(pkg);
++            if (p == null || !depsMet(ctx, p.optJSONArray("staticDeps"))) {
++                return null;
++            }
++            JSONObject variants = p.getJSONObject("variants");
++            JSONObject best = null;
++            for (Iterator<String> it = variants.keys(); it.hasNext(); ) {
++                JSONObject v = variants.getJSONObject(it.next());
++                if (suits(ctx, v) && (best == null || v.getLong("versionCode") > best.getLong("versionCode"))) {
++                    best = v;
++                }
++            }
++            return best == null ? null : toRelease(ctx, best);
++        } catch (JSONException e) {
++            throw new IOException("malformed GrapheneOS index entry for " + pkg, e);
++        }
++    }
++
++    private boolean suits(Context ctx, JSONObject v) throws JSONException {
++        if (!"stable".equals(v.optString("channel", "stable"))) {
++            return false;
++        }
++        if (v.optInt("minSdk", 0) > Build.VERSION.SDK_INT) {
++            return false;
++        }
++        if (v.has("maxSdk") && v.getInt("maxSdk") < Build.VERSION.SDK_INT) {
++            return false;
++        }
++        JSONArray abis = v.optJSONArray("abis");
++        if (abis != null && !contains(abis, Build.SUPPORTED_ABIS[0])) {
++            return false;
++        }
++        return depsMet(ctx, v.optJSONArray("staticDeps"));
++    }
++
++    /** Dependencies look like "app.grapheneos.gmscompat >= 1011" or "android < 35". */
++    private static boolean depsMet(Context ctx, JSONArray deps) throws JSONException {
++        if (deps == null) {
++            return true;
++        }
++        for (int i = 0; i < deps.length(); i++) {
++            String[] t = deps.getString(i).trim().split("\\s+");
++            if (t.length != 3) {
++                return false;
++            }
++            long have;
++            if (ANDROID_DEP.equals(t[0])) {
++                have = Build.VERSION.SDK_INT;
++            } else {
++                PackageInfo pi = Util.installed(ctx.getPackageManager(), t[0]);
++                if (pi == null) {
++                    return false;
++                }
++                have = pi.getLongVersionCode();
++            }
++            long want = Long.parseLong(t[2]);
++            boolean ok;
++            switch (t[1]) {
++                case ">=": ok = have >= want; break;
++                case ">": ok = have > want; break;
++                case "<=": ok = have <= want; break;
++                case "<": ok = have < want; break;
++                case "==": ok = have == want; break;
++                default: ok = false;
++            }
++            if (!ok) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    private Release toRelease(Context ctx, JSONObject v) throws JSONException {
++        long vc = v.getLong("versionCode");
++        JSONArray names = v.getJSONArray("apks");
++        JSONArray hashes = v.getJSONArray("apkHashes");
++        JSONArray sizes = v.getJSONArray("apkSizes");
++        if (names.length() != hashes.length() || names.length() != sizes.length()) {
++            throw new JSONException("apks, apkHashes and apkSizes differ in length");
++        }
++
++        String abi = Build.SUPPORTED_ABIS[0].replace('-', '_');
++        String density = pickDensity(ctx, names);
++        Set<String> langs = wantedLanguages(ctx);
++
++        List<Release.Part> parts = new ArrayList<>();
++        for (int i = 0; i < names.length(); i++) {
++            String name = names.getString(i);
++            if (!keep(name, abi, density, langs)) {
++                continue;
++            }
++            Release.Part part = new Release.Part(name, PACKAGES_URL + pkg + "/" + vc + "/" + name,
++                    hashes.getString(i), sizes.getLong(i));
++            if ("base.apk".equals(name)) {
++                parts.add(0, part);
++            } else {
++                parts.add(part);
++            }
++        }
++        if (parts.isEmpty() || !"base.apk".equals(parts.get(0).name)) {
++            throw new JSONException("variant " + vc + " of " + pkg + " has no base.apk");
++        }
++        return new Release(pkg, vc, v.optString("versionName", String.valueOf(vc)), parts);
++    }
++
++    /** The configuration qualifier of a config split, or null for base and feature splits. */
++    private static String qualifier(String name) {
++        String stem = name.endsWith(".apk") ? name.substring(0, name.length() - 4) : name;
++        if (stem.startsWith("split_config.")) {
++            return stem.substring("split_config.".length());
++        }
++        int i = stem.indexOf(".config.");
++        return i < 0 ? null : stem.substring(i + ".config.".length());
++    }
++
++    private static boolean keep(String name, String abi, String density, Set<String> langs) {
++        String q = qualifier(name);
++        if (q == null) {
++            return true;
++        }
++        if (q.equals("arm64_v8a") || q.equals("armeabi_v7a") || q.equals("x86") || q.equals("x86_64")) {
++            return q.equals(abi);
++        }
++        if (q.endsWith("dpi")) {
++            return q.equals(density);
++        }
++        return langs.contains(q);
++    }
++
++    /** The available density split closest to the screen, preferring the next larger one. */
++    private static String pickDensity(Context ctx, JSONArray names) throws JSONException {
++        Set<String> available = new HashSet<>();
++        for (int i = 0; i < names.length(); i++) {
++            String q = qualifier(names.getString(i));
++            if (q != null && q.endsWith("dpi")) {
++                available.add(q);
++            }
++        }
++        int dpi = ctx.getResources().getDisplayMetrics().densityDpi;
++        String larger = null;
++        String largest = null;
++        for (int i = 0; i < DENSITY_NAMES.length; i++) {
++            if (!available.contains(DENSITY_NAMES[i])) {
++                continue;
++            }
++            largest = DENSITY_NAMES[i];
++            if (larger == null && DENSITY_DPI[i] >= dpi) {
++                larger = DENSITY_NAMES[i];
++            }
++        }
++        return larger != null ? larger : largest;
++    }
++
++    private static Set<String> wantedLanguages(Context ctx) {
++        Set<String> langs = new HashSet<>();
++        langs.add("en");
++        LocaleList locales = ctx.getResources().getConfiguration().getLocales();
++        for (int i = 0; i < locales.size(); i++) {
++            langs.add(locales.get(i).getLanguage());
++        }
++        return langs;
++    }
++
++    private static boolean contains(JSONArray a, String s) throws JSONException {
++        for (int i = 0; i < a.length(); i++) {
++            if (s.equals(a.getString(i))) {
++                return true;
++            }
++        }
++        return false;
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Http.java b/apps/AppSetup/src/app/cancunf/appsetup/Http.java
+new file mode 100644
+index 0000000..5eafbdf
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Http.java
+@@ -0,0 +1,145 @@
++package app.cancunf.appsetup;
++
++import java.io.ByteArrayOutputStream;
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.net.HttpURLConnection;
++import java.net.URI;
++import java.net.URISyntaxException;
++import java.net.URL;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++
++/**
++ * HTTPS-only fetching with hard size limits.
++ *
++ * Nothing here is trusted: metadata only decides what to download, and every
++ * APK is checked against its pinned certificate before install. The limits keep
++ * a hostile or broken server from filling storage or memory.
++ */
++final class Http {
++
++    static final int METADATA_MAX = 4 * 1024 * 1024;
++    private static final int CONNECT_TIMEOUT_MS = 20_000;
++    private static final int READ_TIMEOUT_MS = 60_000;
++    private static final int MAX_REDIRECTS = 5;
++    // Generic client name: requests carry nothing that identifies the user or device.
++    private static final String USER_AGENT = "AppSetup";
++
++    interface Progress {
++        void onBytes(long done, long total);
++    }
++
++    static byte[] get(String url, int maxBytes, String accept) throws IOException {
++        HttpURLConnection c = open(url, accept);
++        try (InputStream in = c.getInputStream()) {
++            ByteArrayOutputStream out = new ByteArrayOutputStream();
++            byte[] buf = new byte[16384];
++            int n;
++            while ((n = in.read(buf)) > 0) {
++                if (out.size() + n > maxBytes) {
++                    throw new IOException("response larger than " + maxBytes + " bytes: " + url);
++                }
++                out.write(buf, 0, n);
++            }
++            return out.toByteArray();
++        } finally {
++            c.disconnect();
++        }
++    }
++
++    /**
++     * Downloads to dest. When expectedSize is known the body must match it
++     * exactly; when expectedSha256 is known the hash must match too. Returns the
++     * lowercase hex SHA-256 of what was written.
++     */
++    static String download(String url, File dest, long maxBytes, long expectedSize,
++            String expectedSha256, Progress progress) throws IOException {
++        HttpURLConnection c = open(url, null);
++        MessageDigest md = sha256();
++        long total = expectedSize > 0 ? expectedSize : c.getContentLengthLong();
++        long done = 0;
++        try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(dest)) {
++            byte[] buf = new byte[65536];
++            int n;
++            while ((n = in.read(buf)) > 0) {
++                done += n;
++                if (done > maxBytes || (expectedSize > 0 && done > expectedSize)) {
++                    throw new IOException("download larger than expected: " + url);
++                }
++                md.update(buf, 0, n);
++                out.write(buf, 0, n);
++                if (progress != null) {
++                    progress.onBytes(done, total);
++                }
++            }
++        } finally {
++            c.disconnect();
++        }
++        if (expectedSize > 0 && done != expectedSize) {
++            throw new IOException("size mismatch for " + url + ": " + done + " != " + expectedSize);
++        }
++        String got = Util.hex(md.digest());
++        if (expectedSha256 != null && !expectedSha256.equals(got)) {
++            throw new IOException("SHA-256 mismatch for " + url);
++        }
++        return got;
++    }
++
++    private static HttpURLConnection open(String url, String accept) throws IOException {
++        URI current;
++        try {
++            current = new URI(url);
++        } catch (URISyntaxException e) {
++            throw new IOException("malformed URL: " + url, e);
++        }
++        for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
++            if (!"https".equals(current.getScheme())) {
++                throw new IOException("refusing non-HTTPS URL: " + current);
++            }
++            URL u = current.toURL();
++            HttpURLConnection c = (HttpURLConnection) u.openConnection();
++            c.setConnectTimeout(CONNECT_TIMEOUT_MS);
++            c.setReadTimeout(READ_TIMEOUT_MS);
++            // Redirects are followed by hand so every hop is checked for HTTPS.
++            c.setInstanceFollowRedirects(false);
++            c.setRequestProperty("User-Agent", USER_AGENT);
++            if (accept != null) {
++                c.setRequestProperty("Accept", accept);
++            }
++            int code = c.getResponseCode();
++            if (code >= 300 && code < 400) {
++                String location = c.getHeaderField("Location");
++                c.disconnect();
++                if (location == null) {
++                    throw new IOException("redirect without Location: " + current);
++                }
++                try {
++                    current = current.resolve(new URI(location));
++                } catch (URISyntaxException e) {
++                    throw new IOException("malformed redirect from " + current + ": " + location, e);
++                }
++                continue;
++            }
++            if (code != HttpURLConnection.HTTP_OK) {
++                c.disconnect();
++                throw new IOException("HTTP " + code + " for " + current);
++            }
++            return c;
++        }
++        throw new IOException("too many redirects: " + url);
++    }
++
++    static MessageDigest sha256() {
++        try {
++            return MessageDigest.getInstance("SHA-256");
++        } catch (NoSuchAlgorithmException e) {
++            throw new AssertionError(e);
++        }
++    }
++
++    private Http() {}
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Installer.java b/apps/AppSetup/src/app/cancunf/appsetup/Installer.java
+new file mode 100644
+index 0000000..cb2e1d6
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Installer.java
+@@ -0,0 +1,97 @@
++package app.cancunf.appsetup;
++
++import android.app.PendingIntent;
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.content.pm.PackageInstaller;
++import android.content.pm.PackageManager;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.util.List;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.TimeUnit;
++
++/** Installs a set of APKs (base plus splits) as one PackageInstaller session. */
++final class Installer {
++
++    private static final String ACTION_RESULT = "app.cancunf.appsetup.INSTALL_RESULT";
++    private static final long COMMIT_TIMEOUT_MIN = 15;
++
++    static void install(Context ctx, String pkg, List<File> apks) throws IOException {
++        PackageInstaller pi = ctx.getPackageManager().getPackageInstaller();
++        PackageInstaller.SessionParams params =
++                new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
++        params.setAppPackageName(pkg);
++        params.setInstallReason(PackageManager.INSTALL_REASON_USER);
++        // INSTALL_PACKAGES makes this silent; the pinned-certificate check already ran.
++        params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
++        long total = 0;
++        for (File f : apks) {
++            total += f.length();
++        }
++        params.setSize(total);
++
++        int id = pi.createSession(params);
++        int[] status = {PackageInstaller.STATUS_FAILURE};
++        String[] message = {null};
++        CountDownLatch done = new CountDownLatch(1);
++        String action = ACTION_RESULT + "." + id;
++        BroadcastReceiver receiver = new BroadcastReceiver() {
++            @Override
++            public void onReceive(Context c, Intent intent) {
++                int s = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
++                if (s == PackageInstaller.STATUS_PENDING_USER_ACTION) {
++                    // Should not happen with INSTALL_PACKAGES; if the system asks anyway, let the user answer.
++                    Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent.class);
++                    if (confirm != null) {
++                        c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
++                    }
++                    return;
++                }
++                status[0] = s;
++                message[0] = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
++                done.countDown();
++            }
++        };
++        ctx.registerReceiver(receiver, new IntentFilter(action), Context.RECEIVER_NOT_EXPORTED);
++        try (PackageInstaller.Session session = pi.openSession(id)) {
++            for (File f : apks) {
++                try (InputStream in = new FileInputStream(f);
++                        OutputStream out = session.openWrite(f.getName(), 0, f.length())) {
++                    byte[] buf = new byte[65536];
++                    int n;
++                    while ((n = in.read(buf)) > 0) {
++                        out.write(buf, 0, n);
++                    }
++                    session.fsync(out);
++                }
++            }
++            Intent intent = new Intent(action).setPackage(ctx.getPackageName());
++            PendingIntent result = PendingIntent.getBroadcast(ctx, id, intent,
++                    PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
++            session.commit(result.getIntentSender());
++            if (!done.await(COMMIT_TIMEOUT_MIN, TimeUnit.MINUTES)) {
++                throw new IOException("install of " + pkg + " timed out");
++            }
++        } catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++            throw new IOException("interrupted installing " + pkg, e);
++        } catch (IOException | RuntimeException e) {
++            pi.abandonSession(id);
++            throw e;
++        } finally {
++            ctx.unregisterReceiver(receiver);
++        }
++        if (status[0] != PackageInstaller.STATUS_SUCCESS) {
++            throw new IOException("install of " + pkg + " failed (" + status[0] + "): " + message[0]);
++        }
++    }
++
++    private Installer() {}
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/MainActivity.java b/apps/AppSetup/src/app/cancunf/appsetup/MainActivity.java
+new file mode 100644
+index 0000000..acd768f
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/MainActivity.java
+@@ -0,0 +1,126 @@
++package app.cancunf.appsetup;
++
++import android.app.Activity;
++import android.content.pm.PackageInfo;
++import android.os.Bundle;
++import android.util.TypedValue;
++import android.view.View;
++import android.widget.Button;
++import android.widget.CheckBox;
++import android.widget.LinearLayout;
++import android.widget.ScrollView;
++import android.widget.TextView;
++
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/** A checklist of the managed apps: install the selected ones, or update what is installed. */
++public class MainActivity extends Activity {
++
++    private final ExecutorService worker = Executors.newSingleThreadExecutor();
++    private final Map<String, CheckBox> boxes = new HashMap<>();
++    private final Map<String, TextView> statuses = new HashMap<>();
++    private Button installButton;
++    private Button updateButton;
++    private boolean busy;
++
++    @Override
++    protected void onCreate(Bundle state) {
++        super.onCreate(state);
++        UpdateJobService.schedule(this);
++
++        int pad = dp(16);
++        LinearLayout root = new LinearLayout(this);
++        root.setOrientation(LinearLayout.VERTICAL);
++        root.setPadding(pad, pad, pad, pad);
++
++        TextView intro = new TextView(this);
++        intro.setText(R.string.intro);
++        intro.setPadding(0, 0, 0, pad);
++        root.addView(intro);
++
++        for (Catalog.App app : Catalog.apps()) {
++            CheckBox box = new CheckBox(this);
++            box.setText(app.label);
++            box.setChecked(true);
++            root.addView(box);
++            boxes.put(app.pkg, box);
++
++            TextView status = new TextView(this);
++            status.setPadding(dp(32), 0, 0, dp(8));
++            root.addView(status);
++            statuses.put(app.pkg, status);
++        }
++
++        installButton = new Button(this);
++        installButton.setText(R.string.install_selected);
++        installButton.setOnClickListener(v -> start(Engine.Mode.INSTALL, true));
++        root.addView(installButton);
++
++        updateButton = new Button(this);
++        updateButton.setText(R.string.check_updates);
++        updateButton.setOnClickListener(v -> start(Engine.Mode.UPDATE_ONLY, false));
++        root.addView(updateButton);
++
++        ScrollView scroll = new ScrollView(this);
++        scroll.setFitsSystemWindows(true);
++        scroll.addView(root);
++        setContentView(scroll);
++    }
++
++    @Override
++    protected void onResume() {
++        super.onResume();
++        if (!busy) {
++            showInstalledVersions();
++        }
++    }
++
++    @Override
++    protected void onDestroy() {
++        worker.shutdownNow();
++        super.onDestroy();
++    }
++
++    private void showInstalledVersions() {
++        for (Catalog.App app : Catalog.apps()) {
++            PackageInfo pi = Util.installed(getPackageManager(), app.pkg);
++            statuses.get(app.pkg).setText(pi == null
++                    ? getString(R.string.not_installed)
++                    : getString(R.string.installed_version, pi.versionName));
++        }
++    }
++
++    private void start(Engine.Mode mode, boolean selectedOnly) {
++        List<Catalog.App> apps = new ArrayList<>();
++        for (Catalog.App app : Catalog.apps()) {
++            if (!selectedOnly || boxes.get(app.pkg).isChecked()) {
++                apps.add(app);
++            }
++        }
++        setBusy(true);
++        worker.execute(() -> {
++            Engine.run(getApplicationContext(), apps, mode,
++                    (pkg, status) -> runOnUiThread(() -> statuses.get(pkg).setText(status)));
++            runOnUiThread(() -> setBusy(false));
++        });
++    }
++
++    private void setBusy(boolean b) {
++        busy = b;
++        installButton.setEnabled(!b);
++        updateButton.setEnabled(!b);
++        for (CheckBox box : boxes.values()) {
++            box.setEnabled(!b);
++        }
++        installButton.setText(b ? R.string.working : R.string.install_selected);
++    }
++
++    private int dp(int v) {
++        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Release.java b/apps/AppSetup/src/app/cancunf/appsetup/Release.java
+new file mode 100644
+index 0000000..9190ab6
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Release.java
+@@ -0,0 +1,43 @@
++package app.cancunf.appsetup;
++
++import java.util.List;
++
++/** One installable version of an app, as a source describes it. */
++final class Release {
++
++    static final long UNKNOWN = -1;
++
++    /** One APK file of the release: the base, or a split. */
++    static final class Part {
++        final String name;
++        final String url;
++        /** Lowercase hex SHA-256 when the source publishes one, else null. */
++        final String sha256;
++        /** Exact size when known, else UNKNOWN. */
++        final long size;
++
++        Part(String name, String url, String sha256, long size) {
++            this.name = name;
++            this.url = url;
++            this.sha256 = sha256;
++            this.size = size;
++        }
++    }
++
++    final String pkg;
++    /** UNKNOWN when the source only names the version (GitHub releases). */
++    final long versionCode;
++    final String versionName;
++    /** The first part is the base APK. */
++    final List<Part> parts;
++
++    Release(String pkg, long versionCode, String versionName, List<Part> parts) {
++        if (parts.isEmpty()) {
++            throw new IllegalArgumentException("release without files: " + pkg);
++        }
++        this.pkg = pkg;
++        this.versionCode = versionCode;
++        this.versionName = versionName;
++        this.parts = parts;
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/RunState.java b/apps/AppSetup/src/app/cancunf/appsetup/RunState.java
+new file mode 100644
+index 0000000..7f66ae4
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/RunState.java
+@@ -0,0 +1,103 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++import android.content.SharedPreferences;
++
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.IOException;
++import java.nio.charset.StandardCharsets;
++import java.security.GeneralSecurityException;
++import java.security.KeyFactory;
++import java.security.PublicKey;
++import java.security.Signature;
++import java.security.spec.X509EncodedKeySpec;
++import java.util.Arrays;
++import java.util.Base64;
++
++/** State shared by the sources during one run. */
++final class RunState {
++
++    private static final String GRAPHENE_INDEX_URL = "https://apps.grapheneos.org/metadata.1.0.sjson";
++
++    // GrapheneOS app repository signing key (signify/minisign Ed25519 format), as
++    // pinned in GrapheneOS's own App Store client (app/build.gradle.kts).
++    private static final String GRAPHENE_REPO_KEY = "RWQtZwEu1br1lMh911L3yPOs97cQb9LOks/ALBbqGl21ul695ocWR/ir";
++
++    // DER prefix that turns a raw 32-byte Ed25519 key into a SubjectPublicKeyInfo.
++    private static final byte[] ED25519_SPKI_PREFIX = {
++        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
++    };
++    // Signature trailer: '\n', 100 base64 characters, '\n'.
++    private static final int SIG_B64_LEN = 100;
++
++    private static final String PREFS = "state";
++    private static final String KEY_GRAPHENE_TIME = "graphene_index_time";
++
++    private final Context ctx;
++    private JSONObject grapheneIndex;
++
++    RunState(Context ctx) {
++        this.ctx = ctx;
++    }
++
++    /**
++     * GrapheneOS's app index, signature-checked against the pinned key and
++     * refused if older than one already seen (a replayed old index could steer
++     * us to old, known-vulnerable versions).
++     */
++    JSONObject grapheneIndex() throws IOException {
++        if (grapheneIndex != null) {
++            return grapheneIndex;
++        }
++        byte[] data = Http.get(GRAPHENE_INDEX_URL, Http.METADATA_MAX, null);
++        byte[] body = verifySignify(data);
++        JSONObject index;
++        long time;
++        try {
++            index = new JSONObject(new String(body, StandardCharsets.UTF_8));
++            time = index.getLong("time");
++        } catch (JSONException e) {
++            throw new IOException("malformed GrapheneOS index", e);
++        }
++        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
++        long seen = prefs.getLong(KEY_GRAPHENE_TIME, 0);
++        if (time < seen) {
++            throw new IOException("GrapheneOS index is older than one already seen (" + time + " < " + seen + ")");
++        }
++        prefs.edit().putLong(KEY_GRAPHENE_TIME, time).apply();
++        grapheneIndex = index;
++        return index;
++    }
++
++    static byte[] verifySignify(byte[] data) throws IOException {
++        int n = data.length;
++        if (n < SIG_B64_LEN + 2 || data[n - 1] != '\n' || data[n - SIG_B64_LEN - 2] != '\n') {
++            throw new IOException("GrapheneOS index has no signature trailer");
++        }
++        byte[] body = Arrays.copyOfRange(data, 0, n - SIG_B64_LEN - 2);
++        byte[] sig = Base64.getDecoder().decode(Arrays.copyOfRange(data, n - SIG_B64_LEN - 1, n - 1));
++        byte[] key = Base64.getDecoder().decode(GRAPHENE_REPO_KEY);
++        // Both blobs: 2-byte algorithm "Ed", 8-byte key id, then the key or signature.
++        if (sig.length != 74 || key.length != 42 || sig[0] != 'E' || sig[1] != 'd'
++                || !Arrays.equals(Arrays.copyOfRange(sig, 2, 10), Arrays.copyOfRange(key, 2, 10))) {
++            throw new IOException("GrapheneOS index signed by an unexpected key");
++        }
++        try {
++            byte[] spki = new byte[ED25519_SPKI_PREFIX.length + 32];
++            System.arraycopy(ED25519_SPKI_PREFIX, 0, spki, 0, ED25519_SPKI_PREFIX.length);
++            System.arraycopy(key, 10, spki, ED25519_SPKI_PREFIX.length, 32);
++            PublicKey pub = KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(spki));
++            Signature v = Signature.getInstance("Ed25519");
++            v.initVerify(pub);
++            v.update(body);
++            if (!v.verify(Arrays.copyOfRange(sig, 10, 74))) {
++                throw new IOException("GrapheneOS index signature is invalid");
++            }
++        } catch (GeneralSecurityException e) {
++            throw new IOException("cannot verify GrapheneOS index", e);
++        }
++        return body;
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Source.java b/apps/AppSetup/src/app/cancunf/appsetup/Source.java
+new file mode 100644
+index 0000000..3680b2c
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Source.java
+@@ -0,0 +1,16 @@
++package app.cancunf.appsetup;
++
++import android.content.Context;
++
++import java.io.IOException;
++
++/** Where an app's newest release is published. */
++interface Source {
++
++    /**
++     * The newest release suitable for this device, or null when there is none
++     * (for example, every variant needs a newer OS). Throws on network or format
++     * errors.
++     */
++    Release latest(Context ctx, RunState run) throws IOException;
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/UpdateJobService.java b/apps/AppSetup/src/app/cancunf/appsetup/UpdateJobService.java
+new file mode 100644
+index 0000000..c24f0a5
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/UpdateJobService.java
+@@ -0,0 +1,52 @@
++package app.cancunf.appsetup;
++
++import android.app.job.JobInfo;
++import android.app.job.JobParameters;
++import android.app.job.JobScheduler;
++import android.app.job.JobService;
++import android.content.ComponentName;
++import android.content.Context;
++
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * Daily update check on an unmetered network. It only updates apps that are
++ * already installed: an app the user removed stays removed.
++ */
++public class UpdateJobService extends JobService {
++
++    private static final int JOB_ID = 1;
++    private static final long INTERVAL_MS = 24L * 60 * 60 * 1000;
++
++    private final ExecutorService worker = Executors.newSingleThreadExecutor();
++
++    static void schedule(Context ctx) {
++        JobScheduler js = ctx.getSystemService(JobScheduler.class);
++        if (js.getPendingJob(JOB_ID) != null) {
++            return;
++        }
++        js.schedule(new JobInfo.Builder(JOB_ID, new ComponentName(ctx, UpdateJobService.class))
++                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED)
++                .setRequiresBatteryNotLow(true)
++                .setPeriodic(INTERVAL_MS)
++                .setPersisted(true)
++                .build());
++    }
++
++    @Override
++    public boolean onStartJob(JobParameters params) {
++        worker.execute(() -> {
++            Engine.run(getApplicationContext(), Catalog.apps(), Engine.Mode.UPDATE_ONLY, null);
++            jobFinished(params, false);
++        });
++        return true;
++    }
++
++    @Override
++    public boolean onStopJob(JobParameters params) {
++        // Retry at the next window; a half-written session is abandoned by Installer.
++        worker.shutdownNow();
++        return true;
++    }
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Util.java b/apps/AppSetup/src/app/cancunf/appsetup/Util.java
+new file mode 100644
+index 0000000..e4d2037
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Util.java
+@@ -0,0 +1,30 @@
++package app.cancunf.appsetup;
++
++import android.content.pm.PackageInfo;
++import android.content.pm.PackageManager;
++
++final class Util {
++
++    static String hex(byte[] b) {
++        StringBuilder sb = new StringBuilder(b.length * 2);
++        for (byte x : b) {
++            sb.append(Character.forDigit((x >> 4) & 0xf, 16)).append(Character.forDigit(x & 0xf, 16));
++        }
++        return sb.toString();
++    }
++
++    static String sha256Hex(byte[] data) {
++        return hex(Http.sha256().digest(data));
++    }
++
++    /** The installed package, or null. */
++    static PackageInfo installed(PackageManager pm, String pkg) {
++        try {
++            return pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0));
++        } catch (PackageManager.NameNotFoundException e) {
++            return null;
++        }
++    }
++
++    private Util() {}
++}
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Verifier.java b/apps/AppSetup/src/app/cancunf/appsetup/Verifier.java
+new file mode 100644
+index 0000000..ba710f1
+--- /dev/null
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Verifier.java
+@@ -0,0 +1,49 @@
++package app.cancunf.appsetup;
++
++import android.content.pm.PackageInfo;
++import android.content.pm.PackageManager;
++import android.content.pm.Signature;
++import android.content.pm.SigningInfo;
++
++import java.io.File;
++import java.io.IOException;
++import java.util.Set;
++
++/** The gate between a download and the installer. */
++final class Verifier {
++
++    /**
++     * Checks a downloaded base APK: right package, signed by a pinned
++     * certificate (every current signer when there are several), and the version
++     * the source announced. Returns the archive's version code.
++     */
++    static long check(PackageManager pm, File base, String pkg, Set<String> pins, long expectedVersionCode)
++            throws IOException {
++        PackageInfo pi = pm.getPackageArchiveInfo(base.getPath(),
++                PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES));
++        if (pi == null) {
++            throw new IOException("not a valid APK");
++        }
++        if (!pkg.equals(pi.packageName)) {
++            throw new IOException("APK is " + pi.packageName + ", expected " + pkg);
++        }
++        SigningInfo si = pi.signingInfo;
++        Signature[] signers = si == null ? null : si.getApkContentsSigners();
++        if (signers == null || signers.length == 0) {
++            throw new IOException("APK has no signing certificate");
++        }
++        for (Signature s : signers) {
++            String digest = Util.sha256Hex(s.toByteArray());
++            if (!pins.contains(digest)) {
++                throw new IOException("APK signed by an unknown certificate " + digest);
++            }
++        }
++        long vc = pi.getLongVersionCode();
++        if (expectedVersionCode != Release.UNKNOWN && vc != expectedVersionCode) {
++            throw new IOException("APK is version " + vc + ", source announced " + expectedVersionCode);
++        }
++        return vc;
++    }
++
++    private Verifier() {}
++}
+diff --git a/device.mk b/device.mk
+index b9d0345..f291c5b 100644
+--- a/device.mk
++++ b/device.mk
+@@ -101,6 +101,10 @@ PRODUCT_PACKAGES += \
+     libcamera2ndk_vendor \
+     libcamhal_pad
+ 
++# First-run installer and updater for apps outside the image (apps/AppSetup)
++PRODUCT_PACKAGES += \
++    AppSetup
++
+ # Dex-pre-opt exclusions
+ $(call add-product-dex-preopt-module-config,MotoSignatureApp,disable)
+ 

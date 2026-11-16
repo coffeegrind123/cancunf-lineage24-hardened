@@ -1,0 +1,101 @@
+From d8de2a2f08ca6293d37dd427cdc4642ed1ea4aee Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 15:14:00 +0000
+Subject: [PATCH 22/22] AppSetup: Add Termux and Termux:API from F-Droid
+
+Termux's GitHub builds are signed with a test key whose private half
+is committed to termux-app, so pinning it would protect nothing, and
+any app signed with it could join Termux's shared com.termux UID. Use
+F-Droid's builds, signed with F-Droid's key for the Termux apps, and
+install Termux before its plugin.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../src/app/cancunf/appsetup/Catalog.java      | 14 ++++++++++++--
+ .../src/app/cancunf/appsetup/FDroidSource.java | 18 ++++++++++++------
+ 2 files changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java b/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java
+index 460e858..fd42485 100644
+--- a/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java
++++ b/apps/AppSetup/src/app/cancunf/appsetup/Catalog.java
+@@ -20,6 +20,14 @@ final class Catalog {
+     static final String AURORA = "com.aurora.store";
+     static final String FDROID = "org.fdroid.fdroid";
+     static final String TITANIUM = "io.github.jqssun.helium";
++    static final String TERMUX = "com.termux";
++    static final String TERMUX_API = "com.termux.api";
++
++    // F-Droid's key for the Termux apps (one key: they share the com.termux UID).
++    // Termux's GitHub builds are not used: they are signed with a test key whose
++    // private half is public in termux-app, so a pin on it would protect nothing
++    // and any app could be signed to join Termux's shared UID.
++    private static final String FDROID_TERMUX = "228fb2cfe90831c1499ec3ccaf61e96e8e1ce70766b9474672ce427334d41c42";
+ 
+     // Google's app signing key, and GmsCore's rotated key (GmsCore is signed by the
+     // second with the first in its rotation lineage).
+@@ -43,7 +51,7 @@ final class Catalog {
+         }
+     }
+ 
+-    /** Install order matters: GmsCore before the Play Store. */
++    /** Install order matters: GmsCore before the Play Store, Termux before its plugin. */
+     static List<App> apps() {
+         return List.of(
+                 new App(GMS, "Google Play services (sandboxed)",
+@@ -54,8 +62,10 @@ final class Catalog {
+                         new AuroraFeedSource(),
+                         Set.of("4c626157ad02bda3401a7263555f68a79663fc3e13a4d4369a12570941aa280f"), null),
+                 new App(FDROID, "F-Droid",
+-                        new FDroidSource(),
++                        new FDroidSource(FDROID),
+                         Set.of("43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"), null),
++                new App(TERMUX, "Termux", new FDroidSource(TERMUX), Set.of(FDROID_TERMUX), null),
++                new App(TERMUX_API, "Termux:API", new FDroidSource(TERMUX_API), Set.of(FDROID_TERMUX), TERMUX),
+                 new App(TITANIUM, "Titanium Browser",
+                         new GitHubReleaseSource(TITANIUM, "jqssun/android-titanium-browser"),
+                         Set.of("095540494d53f48ca051bc86c392c46edb29725da5592bd8af3c3d027b3166bb"), null));
+diff --git a/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java b/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java
+index e1b17f0..d159244 100644
+--- a/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java
++++ b/apps/AppSetup/src/app/cancunf/appsetup/FDroidSource.java
+@@ -10,15 +10,21 @@ import java.io.IOException;
+ import java.nio.charset.StandardCharsets;
+ import java.util.List;
+ 
+-/** The F-Droid client from f-droid.org's own repository. */
++/** An app from f-droid.org's own repository, as F-Droid builds and signs it. */
+ final class FDroidSource implements Source {
+ 
+-    private static final String API_URL = "https://f-droid.org/api/v1/packages/" + Catalog.FDROID;
++    private static final String API_URL = "https://f-droid.org/api/v1/packages/";
+     private static final String REPO_URL = "https://f-droid.org/repo/";
+ 
++    private final String pkg;
++
++    FDroidSource(String pkg) {
++        this.pkg = pkg;
++    }
++
+     @Override
+     public Release latest(Context ctx, RunState run) throws IOException {
+-        byte[] body = Http.get(API_URL, Http.METADATA_MAX, "application/json");
++        byte[] body = Http.get(API_URL + pkg, Http.METADATA_MAX, "application/json");
+         try {
+             JSONObject o = new JSONObject(new String(body, StandardCharsets.UTF_8));
+             long vc = o.getLong("suggestedVersionCode");
+@@ -30,11 +36,11 @@ final class FDroidSource implements Source {
+                     name = v.getString("versionName");
+                 }
+             }
+-            String file = Catalog.FDROID + "_" + vc + ".apk";
+-            return new Release(Catalog.FDROID, vc, name,
++            String file = pkg + "_" + vc + ".apk";
++            return new Release(pkg, vc, name,
+                     List.of(new Release.Part("base.apk", REPO_URL + file, null, Release.UNKNOWN)));
+         } catch (JSONException e) {
+-            throw new IOException("malformed F-Droid API response", e);
++            throw new IOException("malformed F-Droid API response for " + pkg, e);
+         }
+     }
+ }
