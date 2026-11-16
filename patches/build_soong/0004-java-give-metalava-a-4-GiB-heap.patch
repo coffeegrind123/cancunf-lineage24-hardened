@@ -1,0 +1,28 @@
+From 5884b7d0c8a377a8899b057c35832189e63b370f Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 01:28:09 +0000
+Subject: [PATCH 4/4] java: give metalava a 4 GiB heap
+
+Metalava runs with the JVM's default heap, a quarter of the memory it
+sees. In a memory-capped build container that is about 1.9 GiB, and
+system-api-stubs-docs-non-updatable ran out of heap (OutOfMemoryError
+while collecting API lint output) once the GmsCompat port added
+system APIs. Javac already gets an explicit heap the same way.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ java/config/droidstubs.go | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/java/config/droidstubs.go b/java/config/droidstubs.go
+index de8f22e..1a073a5 100644
+--- a/java/config/droidstubs.go
++++ b/java/config/droidstubs.go
+@@ -69,6 +69,7 @@ var (
+ 
+ 	metalavaVmFlags = []string{
+ 		"-J-XX:ReservedCodeCacheSize=128m",
++		"-J-Xmx4g",
+ 	}
+ 
+ 	MetalavaVmFlags = strings.Join(metalavaVmFlags, " ")
