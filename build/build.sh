@@ -45,7 +45,8 @@ VARIANT=${VARIANT:-userdebug}
 #   GOMEMLIMIT=9GiB                    soft heap limit for soong_build (Go GC works harder)
 #   SOONG_INCREMENTAL_ANALYSIS=false   overrides the release flag that turns it on
 passthru=()
-for v in GOMEMLIMIT GOGC GODEBUG SOONG_INCREMENTAL_ANALYSIS SOONG_PERIODIC_MEMPROFILE PSI_KILL VM_MIN_MB DISABLE_HOST_CROSS_WINDOWS; do
+#   MFLAGS=-k                          extra flags for m (-k: keep going, to list every error)
+for v in GOMEMLIMIT GOGC GODEBUG SOONG_INCREMENTAL_ANALYSIS SOONG_PERIODIC_MEMPROFILE PSI_KILL VM_MIN_MB DISABLE_HOST_CROSS_WINDOWS MFLAGS; do
     if [ -n "${!v:-}" ]; then
         passthru+=(-e "$v=${!v}")
     fi
@@ -78,7 +79,8 @@ docker run --rm --name lineage-build \
           done > "$memlog" ) &
         sampler=$!
 
-        # Pressure watchdog. At the cgroup limit the kernel evicts file cache
+        # Pressure watchdog (its kill reason is also written to <log>.kill, since
+        # kill -1 takes down the tee that writes the log). At the cgroup limit the kernel evicts file cache
         # (the binaries own pages included) rather than OOM-killing, so the
         # build stalls for minutes while the VM runs out of free memory; on
         # 2026-11-10 that took the Docker Desktop VM down. Kill the build once
@@ -97,19 +99,19 @@ docker run --rm --name lineage-build \
               full=$(awk "/^full/ {split(\$2, a, \"=\"); print int(a[2])}" /sys/fs/cgroup/memory.pressure)
               if [ "${full:-0}" -ge "${PSI_KILL:-25}" ]; then hits=$((hits + 1)); else hits=0; fi
               if [ "$hits" -ge 6 ]; then
-                  echo "PRESSURE KILL: memory full stall avg10=${full}% for 60s; $(tail -n 1 "$memlog")"
+                  echo "PRESSURE KILL: memory full stall avg10=${full}% for 60s; $(tail -n 1 "$memlog")" | tee "${log%.log}.kill"
                   kill -KILL -1
               fi
               avail=$(awk "/^MemAvailable/ {print int(\$2 / 1024)}" /proc/meminfo)
               if [ "${avail:-0}" -lt "${VM_MIN_MB:-700}" ]; then low=$((low + 1)); else low=0; fi
               if [ "$low" -ge 3 ]; then
-                  echo "VM GUARD KILL: VM MemAvailable ${avail} MB for 30s; $(tail -n 1 "$memlog")"
+                  echo "VM GUARD KILL: VM MemAvailable ${avail} MB for 30s; $(tail -n 1 "$memlog")" | tee "${log%.log}.kill"
                   kill -KILL -1
               fi
           done ) &
 
         rc=0
-        nice -n 10 m -j"$JOBS" "$TARGET" || rc=$?
+        nice -n 10 m -j"$JOBS" ${MFLAGS:-} "$TARGET" || rc=$?
         kill "$sampler" 2>/dev/null || true
         echo "BUILD rc=$rc elapsed=$(( $(date +%s) - start ))s"
         echo "memory trace: $memlog (last: $(tail -n 1 "$memlog"))"
