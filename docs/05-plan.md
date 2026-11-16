@@ -95,7 +95,9 @@ Because both projects share the same AOSP base, most of these should cherry-pick
 2. **GmsCompat port** plus sandboxed Play:
    - port: **done 2026-11-16**, about 100 GrapheneOS commits in 22 projects ([06-gmscompat-port.md](06-gmscompat-port.md)). It runs on the phone: GmsCore starts through the compatibility layer with its config, and the Play Store opens to its sign-in screen.
    - sandboxed Play, Aurora Store, F-Droid and Titanium Browser installed by AppSetup ([10-appsetup.md](10-appsetup.md)).
-   - still to verify on the phone: Play Store sign-in and an install, FCM push, location through GmsCore, GmsCore not frozen, and the Play Integrity verdict (expected to fail until phase 4).
+   - verified on the phone (2026-11-16, no Google account): GmsCore's device check-in and FCM registration (FCM Toolbox gets a token, "Online"); GmsCore's main process isn't frozen by the cached-app freezer while cached apps are; Play-services location requests are rerouted to the OS location service.
+   - still to verify: FCM delivery of a real message, Play Store sign-in and an install, and the Play Integrity verdict (expected to fail until phase 4).
+   - **location: port GrapheneOS's network location next** (details in "Location" below). Rerouting works, but indoors nothing answers: LineageOS ships no network location provider, and the GPS had no fix.
 3. **Hardening**, one feature per build, each verified on the phone.
 4. **Integrity support** in the framework.
 5. **Calls and SMS end to end** once a SIM is available.
@@ -149,6 +151,20 @@ PixelOS's Pixel features are a separate layer of Google binaries extracted from 
 - These are Google's proprietary files. They are pulled into the tree at build time through the local manifest (with `android_vendor_pixel_extract-utils`), and never committed to this repo.
 - Pixel-hardware features (Call Screen, Now Playing, Tensor camera processing) don't work on any non-Pixel phone.
 
+## Location
+
+GrapheneOS's sandboxed Play gets locations in three layers. The first is ported; the other two are next.
+
+1. **GmsCompat reroutes Play-services location calls to the OS location service**, so Google's location service never sees them. Ported with phase 2 and working: a Maps request reaches the OS `gps` provider.
+2. **Network location from GrapheneOS's own provider**, the NetworkLocation app ([platform_packages_apps_NetworkLocation](https://github.com/GrapheneOS/platform_packages_apps_NetworkLocation)). It does Wi-Fi positioning against Apple's Wi-Fi location database, queried through GrapheneOS's proxy (TLS 1.3 only). It's opt-in in Settings › Location and doesn't use cell towers. Without it a position needs a GPS fix, which indoors usually means none. To port:
+   - the app (Rust with a JNI entry point, built by Soong) as a new manifest project;
+   - frameworks/base: `df6a80b3bc` (add it to `config_locationProviderPackageNames`), `18c04e99d5` (network location setting), `3539c74dc5` (never remove location providers at runtime), and the fused-provider fixes `8cfd21e7e3`, `cc4fb8697c`, `ae077bd735`;
+   - Settings: the network location toggle;
+   - build: `d29beff2fd`, `7fedec9c19` (add NetworkLocation to the product).
+3. **GNSS assistance through GrapheneOS's servers**: SUPL (`1259408b52`) and PSDS (`f47b691b97`) settings, plus `bd75ca83e6` (don't send the IMSI or phone number to the SUPL server), and their Settings pages (`d186cdd504`, `a2144665cd`). **Check on this phone first:** GrapheneOS wrote these for Pixel GNSS stacks; MediaTek's `mnld` reads SUPL from its own vendor configuration (`agps_profiles_conf2.xml`), so the settings may need a vendor-side counterpart to take effect.
+
+Each piece goes through the same dependency closure and reference checks as the GmsCompat port ([06-gmscompat-port.md](06-gmscompat-port.md)). It's checked on the phone indoors (Wi-Fi fix within seconds) and outdoors (GPS fix, time to first fix).
+
 ## Apps outside the image
 
 None of these are in the system image. [AppSetup](10-appsetup.md) installs them on first run and keeps them updated, each pinned to its signing certificate. That keeps the full OTA under GitHub's 2 GiB file limit: Titanium alone is 335 MB.
@@ -170,4 +186,10 @@ Running Ovis against an agent **on the phone** has two unsupported pieces:
 - herdr's installer deliberately rejects Android. Its Linux arm64 binary was reported working in F-Droid Termux at v0.8.2 ([herdr #3857](https://github.com/herdrdev/herdr/issues/3857)), but not officially.
 - The Ovis server is Bun, which has no native Android/bionic build.
 
-The planned route is herdr plus the Ovis server inside a proot Debian in Termux, with the Ovis app connecting to `localhost:7317`. AppSetup can start that setup in Termux through its `RUN_COMMAND` intent once Termux is installed. The same app also reaches pi on a PC. Both are unverified on Android 17 until tested on the phone.
+The planned route is herdr plus the Ovis server inside a proot Debian in Termux, with the Ovis app connecting to `localhost:7317`. AppSetup can start that setup in Termux through its `RUN_COMMAND` intent once Termux is installed.
+
+**AppSetup follow-ups**
+- Ovis: build from source, sign with our key, publish as a release asset of this repo, pin it in AppSetup.
+- herdr and the Ovis server: a setup step that AppSetup starts in Termux (`RUN_COMMAND`, which needs Termux's `allow-external-apps`). It installs proot Debian, then herdr and the Ovis server, with checksums.
+- Play links: optionally make Aurora Store the handler for Play links on a fresh install. On 2026-11-16 this was set by hand: `pm set-app-links-user-selection` for `play.google.com` and `market.android.com`, plus "Always" in the chooser for `market://`.
+ The same app also reaches pi on a PC. Both are unverified on Android 17 until tested on the phone.
