@@ -1,0 +1,27 @@
+From 344f5c0237aeb9ec4a67aa23807e1cce34e5220c Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 11:12:00 +0000
+Subject: [PATCH] cancunf: Link camerahalserver against libcamhal_pad
+
+extract-files.py adds libcamhal_pad.so as the first DT_NEEDED of the
+camerahalserver blob (device patch 0019), so the regenerated module
+lists it first in shared_libs. Mirror that here until the next
+re-extraction.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 53dd163..883b452 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -51431,6 +51431,7 @@ cc_prebuilt_binary {
+                 "proprietary/vendor/bin/hw/mt6855/camerahalserver",
+             ],
+             shared_libs: [
++                "libcamhal_pad",
+                 "libudf",
+                 "liblog",
+                 "libutils",

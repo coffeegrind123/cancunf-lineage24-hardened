@@ -69,6 +69,9 @@ blobfix_vendor_motorola_cancunf() {
     # libsink-mtk needs the old AudioTrack constructor: device patch 0014.
     "$PATCHELF" --add-needed libaudioclient_shim.so proprietary/system_ext/lib64/libsink-mtk.so
     git add proprietary/system_ext/lib64/libsink-mtk.so
+    # libcamhal_pad pads allocations for the ArcSoft overread; it has to be the
+    # first DT_NEEDED so its malloc precedes libc's: device patch 0019.
+    "$PATCHELF" --add-needed libcamhal_pad.so "$p/bin/hw/mt6855/camerahalserver"
 
     git rm -q "$p/lib/libladder.so" "$p/lib64/libladder.so" \
         "$p/bin/wlan_assistant" "$p/etc/init/wlan_assistant.rc"

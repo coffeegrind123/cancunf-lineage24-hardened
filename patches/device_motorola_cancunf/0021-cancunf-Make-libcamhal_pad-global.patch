@@ -1,0 +1,54 @@
+From 25002b41e343d1a3b6850959b8de22e912552430 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 13:57:42 +0000
+Subject: [PATCH] cancunf: Make libcamhal_pad global
+
+With libcamhal_pad loaded as the first DT_NEEDED of camerahalserver
+(it now logs at start), the front-camera low-light crash still
+happened: the ArcSoft library is dlopened, and bionic resolves a
+dlopened library's symbols from the namespace's global group (the
+executable, LD_PRELOAD libraries and DF_1_GLOBAL libraries) and then
+its own dependencies. A DT_NEEDED of the executable is in neither, so
+the blob kept using libc's malloc and got no padding.
+
+Link libcamhal_pad with -z global so the linker adds it to the global
+group.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ camera/camhal_pad/Android.bp   | 4 ++++
+ camera/camhal_pad/camhal_pad.c | 6 ++++--
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/camera/camhal_pad/Android.bp b/camera/camhal_pad/Android.bp
+index ea18be4..ffe2598 100644
+--- a/camera/camhal_pad/Android.bp
++++ b/camera/camhal_pad/Android.bp
+@@ -6,6 +6,10 @@ cc_library_shared {
+         "libdl",
+         "liblog",
+     ],
++    // DF_1_GLOBAL: the linker puts the library in every lookup's global group,
++    // so libraries the HAL dlopens (the ArcSoft one) also bind to this malloc.
++    // As a plain DT_NEEDED it only interposes for the executable's own tree.
++    ldflags: ["-Wl,-z,global"],
+     cflags: [
+         "-Wall",
+         "-Werror",
+diff --git a/camera/camhal_pad/camhal_pad.c b/camera/camhal_pad/camhal_pad.c
+index de4062d..d76296e 100644
+--- a/camera/camhal_pad/camhal_pad.c
++++ b/camera/camhal_pad/camhal_pad.c
+@@ -10,8 +10,10 @@
+  * allocations, free() and every other process are unaffected.
+  *
+  * It is linked in as the first DT_NEEDED of the camerahalserver blob
+- * (extract-files.py), so its malloc family precedes libc's for the HAL and for
+- * every library the HAL dlopens. LD_PRELOAD does not work here: init starts
++ * (extract-files.py) and built with -z global (DF_1_GLOBAL). The first makes
++ * its malloc family precede libc's for the HAL; the second puts it in the
++ * linker's global group, which is what lookups from dlopened libraries (the
++ * ArcSoft one) search first. LD_PRELOAD would do both, but does not work here: init starts
+  * the HAL with an SELinux domain transition, the kernel then sets AT_SECURE,
+  * and the linker ignores LD_PRELOAD under AT_SECURE. The policy exception that
+  * would allow it (init noatsecure) is an AOSP neverallow.

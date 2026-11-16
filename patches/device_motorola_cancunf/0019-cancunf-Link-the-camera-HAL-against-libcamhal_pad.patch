@@ -1,0 +1,141 @@
+From 4cd9773e2be3f517b90edb382c770a7d720f59b8 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 08:04:06 +0000
+Subject: [PATCH] cancunf: Link the camera HAL against libcamhal_pad
+
+The LD_PRELOAD override never took effect: init starts camerahalserver
+with a domain transition into mtk_hal_camera, the kernel sets AT_SECURE,
+and the linker ignores LD_PRELOAD under AT_SECURE. Front-camera low-light
+captures kept crashing the HAL in the ArcSoft blob, and the tombstones'
+memory maps show libcamhal_pad was never loaded. Allowing it through
+policy (init noatsecure) is an AOSP neverallow.
+
+Add libcamhal_pad as the first DT_NEEDED of the camerahalserver blob
+instead, so its allocator wrappers precede libc for the HAL and every
+library it dlopens, and drop the rc override. The library now logs one
+line when it loads, so a running HAL can be checked.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ camera/camhal_pad/Android.bp   |  5 ++++-
+ camera/camhal_pad/camhal_pad.c | 21 +++++++++++++++++----
+ device.mk                      |  1 -
+ extract-files.py               |  2 ++
+ init/Android.bp                |  7 -------
+ init/camerahalserver_pad.rc    | 11 -----------
+ 6 files changed, 23 insertions(+), 24 deletions(-)
+ delete mode 100644 init/camerahalserver_pad.rc
+
+diff --git a/camera/camhal_pad/Android.bp b/camera/camhal_pad/Android.bp
+index 31b6e54..ea18be4 100644
+--- a/camera/camhal_pad/Android.bp
++++ b/camera/camhal_pad/Android.bp
+@@ -2,7 +2,10 @@ cc_library_shared {
+     name: "libcamhal_pad",
+     vendor: true,
+     srcs: ["camhal_pad.c"],
+-    shared_libs: ["libdl"],
++    shared_libs: [
++        "libdl",
++        "liblog",
++    ],
+     cflags: [
+         "-Wall",
+         "-Werror",
+diff --git a/camera/camhal_pad/camhal_pad.c b/camera/camhal_pad/camhal_pad.c
+index d0d7b65..de4062d 100644
+--- a/camera/camhal_pad/camhal_pad.c
++++ b/camera/camhal_pad/camhal_pad.c
+@@ -5,11 +5,18 @@
+  * reads a few bytes past the end of large buffers. Scudo places a guard page
+  * right after large ("secondary") allocations, so the overread crashes the
+  * camera HAL with SEGV_ACCERR ("possible buffer overflow accessing after
+- * secondary allocation"). The blob cannot be fixed, so this library, preloaded
+- * into camerahalserver only, adds PAD_BYTES of slack to every allocation of at
+- * least PAD_MIN_SIZE bytes. Small allocations, free() and every other process
+- * are unaffected.
++ * secondary allocation"). The blob cannot be fixed, so this library adds
++ * PAD_BYTES of slack to every allocation of at least PAD_MIN_SIZE bytes. Small
++ * allocations, free() and every other process are unaffected.
++ *
++ * It is linked in as the first DT_NEEDED of the camerahalserver blob
++ * (extract-files.py), so its malloc family precedes libc's for the HAL and for
++ * every library the HAL dlopens. LD_PRELOAD does not work here: init starts
++ * the HAL with an SELinux domain transition, the kernel then sets AT_SECURE,
++ * and the linker ignores LD_PRELOAD under AT_SECURE. The policy exception that
++ * would allow it (init noatsecure) is an AOSP neverallow.
+  */
++#include <android/log.h>
+ #include <dlfcn.h>
+ #include <errno.h>
+ #include <stdatomic.h>
+@@ -44,6 +51,12 @@ static _Atomic(aligned_alloc_fn) real_aligned_alloc;
+         f;                                                                \
+     })
+ 
++/* One line at load, so a running HAL can be shown to carry the padding. */
++__attribute__((constructor)) static void announce(void) {
++    __android_log_print(ANDROID_LOG_INFO, "camhal_pad", "padding allocations >= %d bytes by %d",
++                        PAD_MIN_SIZE, PAD_BYTES);
++}
++
+ static size_t padded(size_t size) {
+     if (size < PAD_MIN_SIZE || size > SIZE_MAX - PAD_BYTES) {
+         return size;
+diff --git a/device.mk b/device.mk
+index e68cb54..b9d0345 100644
+--- a/device.mk
++++ b/device.mk
+@@ -99,7 +99,6 @@ PRODUCT_PACKAGES += \
+ # Camera
+ PRODUCT_PACKAGES += \
+     libcamera2ndk_vendor \
+-    camerahalserver_pad.rc \
+     libcamhal_pad
+ 
+ # Dex-pre-opt exclusions
+diff --git a/extract-files.py b/extract-files.py
+index 2b969b1..0ba916b 100755
+--- a/extract-files.py
++++ b/extract-files.py
+@@ -104,6 +104,8 @@ blob_fixups: blob_fixups_user_type = {
+         .replace_needed('libformatter.so', 'libformatter_mtk.so'),
+     'system_ext/lib64/libsink-mtk.so': blob_fixup()
+         .add_needed('libaudioclient_shim.so'),
++    'vendor/bin/hw/mt6855/camerahalserver': blob_fixup()
++        .add_needed('libcamhal_pad.so'),
+     'vendor/lib64/mt6855/libmnl_mtk.so': blob_fixup()
+         .add_needed('libcutils.so'),
+     'vendor/etc/vintf/manifest/manifest_media_c2_V1_2_default.xml': blob_fixup()
+diff --git a/init/Android.bp b/init/Android.bp
+index f7a5d9d..82253ea 100644
+--- a/init/Android.bp
++++ b/init/Android.bp
+@@ -120,10 +120,3 @@ prebuilt_etc {
+     src: "ueventd.mt6855.rc",
+     vendor: true,
+ }
+-
+-prebuilt_etc {
+-    name: "camerahalserver_pad.rc",
+-    src: "camerahalserver_pad.rc",
+-    relative_install_path: "init",
+-    vendor: true,
+-}
+diff --git a/init/camerahalserver_pad.rc b/init/camerahalserver_pad.rc
+deleted file mode 100644
+index 895ac5a..0000000
+--- a/init/camerahalserver_pad.rc
++++ /dev/null
+@@ -1,11 +0,0 @@
+-# Preload libcamhal_pad into the camera HAL: see shims/camhal_pad/camhal_pad.c.
+-# The file name sorts after camerahalserver.rc, which this overrides.
+-service camerahalserver /vendor/bin/hw/camerahalserver
+-    override
+-    class main
+-    user cameraserver
+-    group audio camera input drmrpc sdcard_rw system media graphics
+-    ioprio rt 4
+-    capabilities SYS_NICE
+-    task_profiles CameraServiceCapacity MaxPerformance
+-    setenv LD_PRELOAD /vendor/lib64/libcamhal_pad.so
