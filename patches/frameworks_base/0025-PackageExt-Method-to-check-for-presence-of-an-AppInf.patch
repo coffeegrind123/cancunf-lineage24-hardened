@@ -1,0 +1,26 @@
+From e7bb4db7b1ed2ac14848b2c38c41b32b8312c620 Mon Sep 17 00:00:00 2001
+From: quh4gko8 <88831734+quh4gko8@users.noreply.github.com>
+Date: Tue, 27 May 2025 15:43:38 +0000
+Subject: [PATCH 25/67] PackageExt: Method to check for presence of an
+ AppInfoExt flag
+
+(cherry picked from commit 1ebdc7328b116ab1eb97a8b09bfcecc32732e4d2)
+---
+ services/core/java/com/android/server/pm/ext/PackageExt.java | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/services/core/java/com/android/server/pm/ext/PackageExt.java b/services/core/java/com/android/server/pm/ext/PackageExt.java
+index 99bc015249..0d2e6a5275 100644
+--- a/services/core/java/com/android/server/pm/ext/PackageExt.java
++++ b/services/core/java/com/android/server/pm/ext/PackageExt.java
+@@ -40,6 +40,10 @@ public class PackageExt implements PackageExtIface {
+         this.hooks = PackageHooksRegistry.getHooks(packageId);
+     }
+ 
++    public boolean hasFlag(@android.ext.AppInfoExtFlag.Enum int flag) {
++        return (this.flags & (1 << flag)) != 0;
++    }
++
+     public int getPackageId() {
+         return packageId;
+     }

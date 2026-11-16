@@ -1,0 +1,65 @@
+From ff9bfca45ef470d64c07c850b147bab37b0dd40f Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 5 Jun 2026 08:50:07 +0000
+Subject: [PATCH 28/67] SourceStampVerifier: add an option to require a
+ specific source stamp
+
+(cherry picked from commit 9e0261c42de9e1b3ad1b5e926725e1dc2f392c2b)
+---
+ .../android/util/apk/SourceStampVerifier.java | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/android/util/apk/SourceStampVerifier.java b/core/java/android/util/apk/SourceStampVerifier.java
+index 11d7a005a6..94ff47614a 100644
+--- a/core/java/android/util/apk/SourceStampVerifier.java
++++ b/core/java/android/util/apk/SourceStampVerifier.java
+@@ -25,6 +25,7 @@ import static android.util.apk.ApkSigningBlockUtils.isSupportedSignatureAlgorith
+ import static android.util.apk.ApkSigningBlockUtils.readLengthPrefixedByteArray;
+ import static android.util.apk.ApkSigningBlockUtils.verifyProofOfRotationStruct;
+ 
++import android.annotation.Nullable;
+ import android.util.Pair;
+ import android.util.Slog;
+ import android.util.jar.StrictJarFile;
+@@ -94,10 +95,16 @@ public abstract class SourceStampVerifier {
+ 
+     /** Verifies SourceStamp present in a list of (split) APKs for the same app. */
+     public static SourceStampVerificationResult verify(List<String> apkFiles) {
++        return verify(apkFiles, null);
++    }
++
++    public static SourceStampVerificationResult verify(List<String> apkFiles,
++                                                       @Nullable byte[] requiredSourceStampCertDigest) {
+         Certificate stampCertificate = null;
+         List<? extends Certificate> stampCertificateLineage = Collections.emptyList();
+         for (String apkFile : apkFiles) {
+-            SourceStampVerificationResult sourceStampVerificationResult = verify(apkFile);
++            SourceStampVerificationResult sourceStampVerificationResult = verify(apkFile,
++                    requiredSourceStampCertDigest);
+             if (!sourceStampVerificationResult.isPresent()
+                     || !sourceStampVerificationResult.isVerified()) {
+                 return sourceStampVerificationResult;
+@@ -116,6 +123,11 @@ public abstract class SourceStampVerifier {
+ 
+     /** Verifies SourceStamp present in the provided APK. */
+     public static SourceStampVerificationResult verify(String apkFile) {
++        return verify(apkFile, null);
++    }
++
++    public static SourceStampVerificationResult verify(String apkFile,
++                                                       @Nullable byte[] requiredSourceStampCertDigest) {
+         StrictJarFile apkJar = null;
+         try (RandomAccessFile apk = new RandomAccessFile(apkFile, "r")) {
+             apkJar =
+@@ -129,6 +141,11 @@ public abstract class SourceStampVerifier {
+                 // SourceStamp present.
+                 return SourceStampVerificationResult.notPresent();
+             }
++            if (requiredSourceStampCertDigest != null) {
++                if (!Arrays.equals(sourceStampCertificateDigest, requiredSourceStampCertDigest)) {
++                    return SourceStampVerificationResult.notVerified();
++                }
++            }
+             byte[] manifestBytes = getManifestBytes(apkJar);
+             return verify(apk, sourceStampCertificateDigest, manifestBytes);
+         } catch (IOException e) {

@@ -1,0 +1,48 @@
+From 20510239f1fd3a039518c62f065dca8e96fe5ffb Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Mon, 16 Nov 2026 15:13:48 +0000
+Subject: [PATCH 67/67] StorageScopesAppHooks: Don't redirect to a missing
+ prompt
+
+The Storage Scopes infrastructure (GrapheneOS c3783c2c35, ported as a
+GmsCompat dependency) rewrites an app's own all-files-access and
+manage-media requests to *_PROMPT actions that only GrapheneOS's
+PermissionController handles (a3099f2968, c46e45e26c). Those are not
+part of this build, so the request had no handler: Aurora Store
+crashed with ActivityNotFoundException when asking for all-files
+access, and so would any app that asks.
+
+Leave the intent as the app sent it, which opens the standard Settings
+page, until Storage Scopes is ported.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../android/internal/app/StorageScopesAppHooks.java | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/core/java/com/android/internal/app/StorageScopesAppHooks.java b/core/java/com/android/internal/app/StorageScopesAppHooks.java
+index 717f249f0c..e41af514c2 100644
+--- a/core/java/com/android/internal/app/StorageScopesAppHooks.java
++++ b/core/java/com/android/internal/app/StorageScopesAppHooks.java
+@@ -93,8 +93,21 @@ public class StorageScopesAppHooks {
+         return shouldSpoofSelfPermissionCheckInner(getSpoofableAppOpPermissionDflag(op));
+     }
+ 
++    // GrapheneOS redirects an app's own all-files-access and manage-media requests to a
++    // PermissionController prompt (MANAGE_APP_ALL_FILES_ACCESS_PERMISSION_PROMPT,
++    // REQUEST_MANAGE_MEDIA_PROMPT) that offers Storage Scopes as an alternative. This build has
++    // the Storage Scopes infrastructure but not that prompt or the Storage Scopes UI
++    // (GrapheneOS packages/modules/Permission a3099f2968, c46e45e26c), so a redirected request
++    // had no handler and the app crashed with ActivityNotFoundException. Leave the intent as the
++    // app sent it until Storage Scopes is ported.
++    private static final boolean STORAGE_SCOPES_PROMPT_AVAILABLE = false;
++
+     // Instrumentation#execStartActivity(Context, IBinder, IBinder, Activity, Intent, int, Bundle)
+     public static void maybeModifyActivityIntent(Context ctx, Intent i) {
++        if (!STORAGE_SCOPES_PROMPT_AVAILABLE) {
++            return;
++        }
++
+         String action = i.getAction();
+         if (action == null) {
+             return;

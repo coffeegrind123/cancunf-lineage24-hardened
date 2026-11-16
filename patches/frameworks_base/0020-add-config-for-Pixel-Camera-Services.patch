@@ -1,0 +1,97 @@
+From 65b1dfc30de630036c7f90320d869797ffe508d7 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 9 Jan 2024 11:38:03 +0200
+Subject: [PATCH 20/67] add config for Pixel Camera Services
+
+(cherry picked from commit 948523d8527fb618d19b6286d71b4a9ef18287ab)
+---
+ .../server/pm/ext/PackageHooksRegistry.java   |  2 +
+ .../pm/ext/PixelCameraServicesHooks.java      | 59 +++++++++++++++++++
+ 2 files changed, 61 insertions(+)
+ create mode 100644 services/core/java/com/android/server/pm/ext/PixelCameraServicesHooks.java
+
+diff --git a/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java b/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
+index 32982704fa..807bb39199 100644
+--- a/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
++++ b/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
+@@ -16,6 +16,7 @@ public class PackageHooksRegistry {
+             case PackageId.GSF_NAME -> new GsfParsingHooks();
+             case PackageId.EUICC_SUPPORT_PIXEL_NAME -> new EuiccSupportPixelHooks.ParsingHooks();
+             case PackageId.G_EUICC_LPA_NAME -> new EuiccGoogleHooks.ParsingHooks();
++            case PackageId.PIXEL_CAMERA_SERVICES_NAME -> new PixelCameraServicesHooks.ParsingHooks();
+             default -> PackageParsingHooks.DEFAULT;
+         };
+     }
+@@ -26,6 +27,7 @@ public class PackageHooksRegistry {
+             case PackageId.G_CARRIER_SETTINGS -> new GCarrierSettingsHooks();
+             case PackageId.G_EUICC_LPA -> new EuiccGoogleHooks();
+             case PackageId.ANDROID_AUTO -> new AndroidAutoHooks();
++            case PackageId.PIXEL_CAMERA_SERVICES -> new PixelCameraServicesHooks();
+             case PackageId.GMS_CORE -> new GmsCoreHooks();
+             default -> PackageHooks.DEFAULT;
+         };
+diff --git a/services/core/java/com/android/server/pm/ext/PixelCameraServicesHooks.java b/services/core/java/com/android/server/pm/ext/PixelCameraServicesHooks.java
+new file mode 100644
+index 0000000000..8d4b5fb7b0
+--- /dev/null
++++ b/services/core/java/com/android/server/pm/ext/PixelCameraServicesHooks.java
+@@ -0,0 +1,59 @@
++package com.android.server.pm.ext;
++
++import android.Manifest;
++import android.ext.PackageId;
++
++import com.android.internal.pm.pkg.component.ParsedUsesPermission;
++import com.android.internal.pm.pkg.parsing.PackageParsingHooks;
++import com.android.server.pm.pkg.PackageStateInternal;
++
++public class PixelCameraServicesHooks extends PackageHooks {
++
++    static class ParsingHooks extends PackageParsingHooks {
++        @Override
++        public boolean shouldSkipUsesPermission(ParsedUsesPermission p) {
++            switch (p.getName()) {
++                // Pixel Camera Services currently doesn't use any of these permissions.
++                // [1] states that PCS (Pixel Camera Servicss) is planned "to be able act as a media
++                // app and use Exoplayer for playing recorded video files". This functionality is
++                // not implemented in the current release as of January 2024.
++                //
++                // [1] https://android.googlesource.com/device/google/gs-common/+/46d6a8821196ab313a5f28c009ce9b2548ea2569
++                case Manifest.permission.BLUETOOTH_CONNECT:
++                case Manifest.permission.BLUETOOTH_SCAN:
++                case Manifest.permission.CAPTURE_AUDIO_OUTPUT:
++                case Manifest.permission.MODIFY_AUDIO_ROUTING:
++                // added in 14 QPR3:
++                case Manifest.permission.ACCESS_FINE_LOCATION:
++                case Manifest.permission.INTERACT_ACROSS_USERS:
++                // needed for the Connected Cameras feature that is currently unsupported on GrapheneOS:
++                // https://support.google.com/pixelphone/answer/15985851?hl=en
++                case Manifest.permission.MANAGE_USB:
++                case Manifest.permission.MODIFY_AUDIO_SETTINGS:
++                    return true;
++            }
++
++            return false;
++        }
++    }
++
++    @Override
++    public boolean shouldBlockPackageVisibility(int userId, PackageStateInternal otherPkg) {
++        // Pixel Camera Services is a privileged app, block it from interacting with unprivileged
++        // parts of sandboxed Google Play.
++        //
++        // Pixel Camera Services currently uses GmsCore only for telemetry (perf data reporting),
++        // and doesn't use Play Store, at least directly.
++        //
++        // Also, Play Store would be unable to update Pixel Camera Services if it was allowed to see
++        // it due to the fs-verity requirements for system package updates.
++        switch (otherPkg.getPackageName()) {
++            case PackageId.GSF_NAME:
++            case PackageId.GMS_CORE_NAME:
++            case PackageId.PLAY_STORE_NAME:
++                return true;
++        }
++
++        return false;
++    }
++}

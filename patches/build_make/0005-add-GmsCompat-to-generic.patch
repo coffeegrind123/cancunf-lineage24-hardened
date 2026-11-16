@@ -1,0 +1,22 @@
+From 7c0aae20b90af5c93075ead9ccff9219835f08b6 Mon Sep 17 00:00:00 2001
+From: Daniel Micay <daniel.micay@grapheneos.org>
+Date: Tue, 20 Oct 2026 13:11:31 -0400
+Subject: [PATCH 5/7] add GmsCompat to generic
+
+(cherry picked from commit d5bcfdf6d92ac7e2a75bba65c315324dd6faba9e)
+---
+ target/product/generic/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/product/generic/Android.bp b/target/product/generic/Android.bp
+index b2ee0fe73..73096ba3f 100644
+--- a/target/product/generic/Android.bp
++++ b/target/product/generic/Android.bp
+@@ -849,6 +849,7 @@ system_image_defaults {
+                 "ExtShared", // base_system
+                 "ExternalStorageProvider", // handheld_system
+                 "FusedLocation", // handheld_system
++                "GmsCompat", // handheld_system
+                 "HTMLViewer", // media_system
+                 "InputDevices", // handheld_system
+                 "IntentResolver", // base_system

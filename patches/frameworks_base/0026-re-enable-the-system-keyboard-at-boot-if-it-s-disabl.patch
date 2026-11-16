@@ -1,0 +1,35 @@
+From c5b2e0ff2f968fb81ecce3cf20c9c1824727272a Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 6 Jan 2026 14:47:16 +0000
+Subject: [PATCH 26/67] re-enable the system keyboard at boot if it's disabled
+
+(cherry picked from commit e1ef271515ef17d8436a8ac20b5b94ebd47dff14)
+---
+ core/java/android/ext/PackageId.java                            | 2 ++
+ .../core/java/com/android/server/ext/PackageManagerHooks.java   | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/core/java/android/ext/PackageId.java b/core/java/android/ext/PackageId.java
+index 7bd6c61f3d..2784ba86b8 100644
+--- a/core/java/android/ext/PackageId.java
++++ b/core/java/android/ext/PackageId.java
+@@ -54,4 +54,6 @@ public interface PackageId {
+ 
+     /** @hide */ String BUGLE_NAME = "com.google.android.apps.messaging";
+     /** @hide */ int BUGLE = 14;
++
++    /** @hide */ String SYSTEM_KEYBOARD = "com.android.inputmethod.latin";
+ }
+diff --git a/services/core/java/com/android/server/ext/PackageManagerHooks.java b/services/core/java/com/android/server/ext/PackageManagerHooks.java
+index 90185f46d1..5e9e0bc4c2 100644
+--- a/services/core/java/com/android/server/ext/PackageManagerHooks.java
++++ b/services/core/java/com/android/server/ext/PackageManagerHooks.java
+@@ -41,6 +41,8 @@ public class PackageManagerHooks {
+                     // one of the previous OS versions enabled EuiccSupportPixel in all users
+                     return PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+                 }
++            case PackageId.SYSTEM_KEYBOARD:
++                return PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
+             default:
+                 return null;
+         }

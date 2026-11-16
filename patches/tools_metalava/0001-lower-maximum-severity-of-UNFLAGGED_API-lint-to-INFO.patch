@@ -1,0 +1,26 @@
+From e4d5014d1a34ed400cc417dcf873490fb451665b Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Wed, 11 Dec 2024 16:18:10 +0200
+Subject: [PATCH] lower maximum severity of UNFLAGGED_API lint to INFO
+
+Added APIs aren't flagged on GrapheneOS.
+
+Change-Id: Idcd33ae0a70d4d306affddec1862829f8cff4e13
+(cherry picked from commit 1b01bb1a5a0950b14ba5b15c742f67ea9040f4fd)
+---
+ .../java/com/android/tools/metalava/lint/FilteringReporter.kt   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/metalava/src/main/java/com/android/tools/metalava/lint/FilteringReporter.kt b/metalava/src/main/java/com/android/tools/metalava/lint/FilteringReporter.kt
+index 177e269..3fe3e3b 100644
+--- a/metalava/src/main/java/com/android/tools/metalava/lint/FilteringReporter.kt
++++ b/metalava/src/main/java/com/android/tools/metalava/lint/FilteringReporter.kt
+@@ -105,7 +105,7 @@ class FilteringReporter(
+             // previously released API because they are being reported because there is a change
+             // compared with the previously released API.
+             issue == Issues.UNFLAGGED_API || issue == Issues.UNEXPORTED_FLAGGED_API -> {
+-                Severity.ERROR
++                Severity.INFO
+             }
+ 
+             // If the issue is being reported on the [contextItem] then limit this to the maximum

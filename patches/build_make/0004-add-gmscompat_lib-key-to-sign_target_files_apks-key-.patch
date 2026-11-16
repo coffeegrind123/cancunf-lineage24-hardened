@@ -1,0 +1,23 @@
+From 01fe8a544d62fd0a78252b7cf0f6de355b94012d Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Thu, 23 Oct 2025 13:38:57 +0300
+Subject: [PATCH 4/7] add gmscompat_lib key to sign_target_files_apks key
+ mapping
+
+(cherry picked from commit f040dcf2f6f425099dc15559a48614637292efe3)
+---
+ tools/releasetools/sign_target_files_apks.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tools/releasetools/sign_target_files_apks.py b/tools/releasetools/sign_target_files_apks.py
+index 32e3208ae..5810172a6 100755
+--- a/tools/releasetools/sign_target_files_apks.py
++++ b/tools/releasetools/sign_target_files_apks.py
+@@ -1507,6 +1507,7 @@ def BuildKeyMap(misc_info, key_mapping_options):
+           devkeydir + "/networkstack": d + "/networkstack",
+           devkeydir + "/sdk_sandbox": d + "/sdk_sandbox",
+           devkeydir + "/bluetooth": d + "/bluetooth",
++          devkeydir + "/gmscompat_lib": d + "/gmscompat_lib",
+       })
+     else:
+       OPTIONS.key_map[s] = d

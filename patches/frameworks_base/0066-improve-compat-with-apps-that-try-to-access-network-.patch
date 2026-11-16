@@ -1,0 +1,171 @@
+From 08d581a53b0dd711dfdd11ab281db895c4824abe Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 19 Jun 2023 13:46:06 +0300
+Subject: [PATCH 66/67] improve compat with apps that try to access network
+ location provider
+
+If there's no network location provider:
+- redirect network location requests to one of available location providers
+- stub out mock location management calls for network provider (TestProvider methods), since
+redirecting them is infeasible
+
+These changes apply only to third-party apps.
+
+There's a relevant system feature (android.hardware.location.network) that is still listed as
+available to improve app compatibility.
+Removing it would not make this change redundant, because there are apps that try to use the network
+location provider without declaring the need for this feature or checking its presence at runtime.
+
+(cherry picked from commit 3708efda4530e61a1f7f07fe34b4945ac250efb3)
+---
+ .../location/HookedLocationManager.java       | 77 +++++++++++++------
+ 1 file changed, 53 insertions(+), 24 deletions(-)
+
+diff --git a/location/java/android/location/HookedLocationManager.java b/location/java/android/location/HookedLocationManager.java
+index 6428407fcd..bc6f04a896 100644
+--- a/location/java/android/location/HookedLocationManager.java
++++ b/location/java/android/location/HookedLocationManager.java
+@@ -4,7 +4,7 @@ import android.annotation.NonNull;
+ import android.annotation.Nullable;
+ import android.app.PendingIntent;
+ import android.content.Context;
+-import android.content.pm.GosPackageStateBase;
++import android.content.pm.GosPackageState;
+ import android.location.provider.ProviderProperties;
+ import android.os.CancellationSignal;
+ 
+@@ -15,10 +15,18 @@ import java.util.function.Consumer;
+ 
+ /** @hide */
+ public class HookedLocationManager extends LocationManager {
++
++    private static final int FLAG_ENABLE_PROVIDER_TRANSLATION = 1;
++
+     private static int flags;
+ 
+-    public static int getFlags(GosPackageStateBase gosPs, boolean isUserApp) {
+-        return 0;
++    public static int getFlags(GosPackageState gosPs, boolean isUserApp) {
++        if (isUserApp) {
++            // see comment in translateProvider()
++            return FLAG_ENABLE_PROVIDER_TRANSLATION;
++        } else {
++            return 0;
++        }
+     }
+ 
+     public static void setFlags(int v) {
+@@ -33,14 +41,44 @@ public class HookedLocationManager extends LocationManager {
+         super(context, service);
+     }
+ 
++    private String translateProvider(String provider) {
++        if ((flags & FLAG_ENABLE_PROVIDER_TRANSLATION) == 0) {
++            return provider;
++        }
++
++        // There are apps that try to use NETWORK_PROVIDER even when it's not present in the list
++        // returned by getAllProviders(), which leads to a crash.
++        // As a workaround, redirect NETWORK_PROVIDER calls to an available provider
++        if (NETWORK_PROVIDER.equals(provider)) {
++            // getAllProviders() list is not guaranteed to be static, don't cache it
++            List<String> allProviders = getAllProviders();
++            if (allProviders.contains(NETWORK_PROVIDER)) {
++                return NETWORK_PROVIDER;
++            }
++            if (allProviders.contains(GPS_PROVIDER)) {
++                return GPS_PROVIDER;
++            }
++            if (allProviders.contains(FUSED_PROVIDER)) {
++                return FUSED_PROVIDER;
++            }
++            // PASSIVE_PROVIDER is always present
++            return PASSIVE_PROVIDER;
++        }
++        return provider;
++    }
++
+     @Override
+     public boolean isProviderEnabled(@NonNull String provider) {
++        provider = translateProvider(provider);
++
+         return super.isProviderEnabled(provider);
+     }
+ 
+     @Nullable
+     @Override
+     public ProviderProperties getProviderProperties(@NonNull String provider) {
++        provider = translateProvider(provider);
++
+         return super.getProviderProperties(provider);
+     }
+ 
+@@ -48,6 +86,8 @@ public class HookedLocationManager extends LocationManager {
+     @Override
+     public Location getLastKnownLocation(@NonNull String provider,
+                                          @NonNull LastLocationRequest lastLocationRequest) {
++        provider = translateProvider(provider);
++
+         return super.getLastKnownLocation(provider, lastLocationRequest);
+     }
+ 
+@@ -55,49 +95,38 @@ public class HookedLocationManager extends LocationManager {
+     public void getCurrentLocation(@NonNull String provider, @NonNull LocationRequest locationRequest,
+                                    @Nullable CancellationSignal cancellationSignal,
+                                    @NonNull Executor executor, @NonNull Consumer<Location> consumer) {
++        provider = translateProvider(provider);
++
+         super.getCurrentLocation(provider, locationRequest, cancellationSignal, executor, consumer);
+     }
+ 
+     @Override
+     public void requestLocationUpdates(@NonNull String provider, @NonNull LocationRequest locationRequest,
+                                        @NonNull Executor executor, @NonNull LocationListener listener) {
++        provider = translateProvider(provider);
++
+         super.requestLocationUpdates(provider, locationRequest, executor, listener);
+     }
+ 
+     @Override
+     public void requestLocationUpdates(@NonNull String provider, @NonNull LocationRequest locationRequest,
+                                        @NonNull PendingIntent pendingIntent) {
++        provider = translateProvider(provider);
++
+         super.requestLocationUpdates(provider, locationRequest, pendingIntent);
+     }
+ 
+     @Override
+     public void requestFlush(@NonNull String provider, @NonNull LocationListener listener, int requestCode) {
++        provider = translateProvider(provider);
++
+         super.requestFlush(provider, listener, requestCode);
+     }
+ 
+     @Override
+     public void requestFlush(@NonNull String provider, @NonNull PendingIntent pendingIntent, int requestCode) {
+-        super.requestFlush(provider, pendingIntent, requestCode);
+-    }
+-
+-    @Override
+-    public void addTestProvider(@NonNull String provider, @NonNull ProviderProperties properties,
+-                                @NonNull Set<String> extraAttributionTags) {
+-        super.addTestProvider(provider, properties, extraAttributionTags);
+-    }
+-
+-    @Override
+-    public void removeTestProvider(@NonNull String provider) {
+-        super.removeTestProvider(provider);
+-    }
+-
+-    @Override
+-    public void setTestProviderEnabled(@NonNull String provider, boolean enabled) {
+-        super.setTestProviderEnabled(provider, enabled);
+-    }
++        provider = translateProvider(provider);
+ 
+-    @Override
+-    public void setTestProviderLocation(@NonNull String provider, @NonNull Location location) {
+-        super.setTestProviderLocation(provider, location);
++        super.requestFlush(provider, pendingIntent, requestCode);
+     }
+ }

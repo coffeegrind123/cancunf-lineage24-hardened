@@ -1,0 +1,372 @@
+From 58b1f6693d8d8866598dc8bc6360e5ffb8d6cc2b Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 16 May 2023 15:38:31 +0300
+Subject: [PATCH 21/67] support redirecting ContentProvider calls to another
+ provider
+
+(cherry picked from commit 52a143cb646f7d24e3db322110daf03ab1f2e77a)
+---
+ core/java/android/app/ContextImpl.java        |   4 +
+ .../java/android/content/ContentProvider.java |   3 +-
+ .../java/android/content/ContentResolver.java |  18 +++
+ .../app/ContentProviderRedirector.java        | 129 ++++++++++++++++++
+ .../app/RedirectedContentProvider.java        | 107 +++++++++++++++
+ 5 files changed, 260 insertions(+), 1 deletion(-)
+ create mode 100644 core/java/com/android/internal/app/ContentProviderRedirector.java
+ create mode 100644 core/java/com/android/internal/app/RedirectedContentProvider.java
+
+diff --git a/core/java/android/app/ContextImpl.java b/core/java/android/app/ContextImpl.java
+index 138415bb8d..905ccafc00 100644
+--- a/core/java/android/app/ContextImpl.java
++++ b/core/java/android/app/ContextImpl.java
+@@ -21,6 +21,7 @@ import static android.content.pm.PackageManager.PERMISSION_GRANTED;
+ import static android.os.StrictMode.vmIncorrectContextUseEnabled;
+ import static android.permission.flags.Flags.shouldRegisterAttributionSource;
+ import static android.view.WindowManager.LayoutParams.WindowType;
++import static com.android.internal.app.ContentProviderRedirector.translateContentProviderAuthority;
+ import static com.android.internal.gmscompat.GmcDebug.maybeLogSendBroadcast;
+ import static com.android.internal.gmscompat.GmcDebug.maybeLogStartService;
+ 
+@@ -4219,6 +4220,7 @@ class ContextImpl extends Context {
+         @UnsupportedAppUsage
+         @RavenwoodRedirect
+         protected IContentProvider acquireProvider(Context context, String auth) {
++            auth = translateContentProviderAuthority(auth);
+             return mMainThread.acquireProvider(context,
+                     ContentProvider.getAuthorityWithoutUserId(auth),
+                     resolveUserIdFromAuthority(auth), true);
+@@ -4227,6 +4229,7 @@ class ContextImpl extends Context {
+         @Override
+         @RavenwoodRedirect
+         protected IContentProvider acquireExistingProvider(Context context, String auth) {
++            auth = translateContentProviderAuthority(auth);
+             return mMainThread.acquireExistingProvider(context,
+                     ContentProvider.getAuthorityWithoutUserId(auth),
+                     resolveUserIdFromAuthority(auth), true);
+@@ -4241,6 +4244,7 @@ class ContextImpl extends Context {
+         @Override
+         @RavenwoodRedirect
+         protected IContentProvider acquireUnstableProvider(Context c, String auth) {
++            auth = translateContentProviderAuthority(auth);
+             return mMainThread.acquireProvider(c,
+                     ContentProvider.getAuthorityWithoutUserId(auth),
+                     resolveUserIdFromAuthority(auth), false);
+diff --git a/core/java/android/content/ContentProvider.java b/core/java/android/content/ContentProvider.java
+index 7dd836e0f0..b74dfe7156 100644
+--- a/core/java/android/content/ContentProvider.java
++++ b/core/java/android/content/ContentProvider.java
+@@ -2832,7 +2832,8 @@ public abstract class ContentProvider implements ContentInterface, ComponentCall
+         writer.println("nothing to dump");
+     }
+ 
+-    private void validateIncomingAuthority(String authority) throws SecurityException {
++    /** @hide */
++    protected void validateIncomingAuthority(String authority) throws SecurityException {
+         if (!matchesOurAuthorities(getAuthorityWithoutUserId(authority))) {
+             String message = "The authority " + authority + " does not match the one of the "
+                     + "contentProvider: ";
+diff --git a/core/java/android/content/ContentResolver.java b/core/java/android/content/ContentResolver.java
+index 584ae8d98b..bd8d1bb6b5 100644
+--- a/core/java/android/content/ContentResolver.java
++++ b/core/java/android/content/ContentResolver.java
+@@ -80,6 +80,7 @@ import android.util.Size;
+ import android.util.SparseArray;
+ 
+ import com.android.internal.annotations.GuardedBy;
++import com.android.internal.app.ContentProviderRedirector;
+ import com.android.internal.gmscompat.GmsCompatApp;
+ import com.android.internal.gmscompat.GmsHooks;
+ import com.android.internal.gmscompat.PlayStoreHooks;
+@@ -2860,6 +2861,10 @@ public abstract class ContentResolver implements ContentInterface {
+     @UnsupportedAppUsage
+     public final void registerContentObserver(Uri uri, boolean notifyForDescendants,
+             ContentObserver observer, @CanBeALL @CanBeCURRENT @UserIdInt int userHandle) {
++        if (ContentProviderRedirector.shouldSkipRegisterContentObserver(uri, notifyForDescendants,
++                observer, userHandle)) {
++            return;
++        }
+         if (GmsCompat.isEnabled()) {
+             if (GmsCompatApp.registerObserver(uri, observer)) {
+                 return;
+@@ -2882,6 +2887,10 @@ public abstract class ContentResolver implements ContentInterface {
+     public final void unregisterContentObserver(@NonNull ContentObserver observer) {
+         Objects.requireNonNull(observer, "observer");
+ 
++        if (ContentProviderRedirector.shouldSkipUnregisterContentObserver(observer)) {
++            return;
++        }
++
+         if (GmsCompat.isEnabled()) {
+             if (GmsCompatApp.unregisterObserver(observer)) {
+                 return;
+@@ -2982,6 +2991,11 @@ public abstract class ContentResolver implements ContentInterface {
+     public void notifyChange(@NonNull Uri uri, @Nullable ContentObserver observer,
+             @NotifyFlags int flags) {
+         Objects.requireNonNull(uri, "uri");
++
++        if (ContentProviderRedirector.shouldSkipNotifyChange(uri, observer, flags)) {
++            return;
++        }
++
+         notifyChange(
+                 ContentProvider.getUriWithoutUserId(uri),
+                 observer,
+@@ -3029,6 +3043,10 @@ public abstract class ContentResolver implements ContentInterface {
+         // Cluster based on user ID
+         final SparseArray<ArrayList<Uri>> clusteredByUser = new SparseArray<>();
+         for (Uri uri : uris) {
++            if (ContentProviderRedirector.shouldSkipNotifyChange(uri, observer, flags)) {
++                continue;
++            }
++
+             final int userId = ContentProvider.getUserIdFromUri(uri, mContext.getUserId());
+             ArrayList<Uri> list = clusteredByUser.get(userId);
+             if (list == null) {
+diff --git a/core/java/com/android/internal/app/ContentProviderRedirector.java b/core/java/com/android/internal/app/ContentProviderRedirector.java
+new file mode 100644
+index 0000000000..53931c8d55
+--- /dev/null
++++ b/core/java/com/android/internal/app/ContentProviderRedirector.java
+@@ -0,0 +1,129 @@
++package com.android.internal.app;
++
++import android.annotation.Nullable;
++import android.content.BroadcastReceiver;
++import android.content.ContentResolver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.database.ContentObserver;
++import android.net.Uri;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.UserHandle;
++import android.util.Log;
++import android.util.Pair;
++
++import java.util.ArrayList;
++import java.util.Collections;
++
++public class ContentProviderRedirector {
++
++    private static volatile boolean isEnabled;
++
++    public static void enable() {
++        isEnabled = true;
++    }
++
++    public static String translateContentProviderAuthority(String auth) {
++        if (!isEnabled) {
++            return auth;
++        }
++
++        String t = null;
++
++        return t != null ? t : auth;
++    }
++
++    // registering a ContentObserver requires having the read permission for the underlying
++    // ContentProvider
++    public static boolean shouldSkipRegisterContentObserver(Uri uri, boolean notifyForDescendants,
++                                                            ContentObserver observer, int userId) {
++        if (!isEnabled) {
++            return false;
++        }
++
++        return false;
++    }
++
++    public static boolean shouldSkipUnregisterContentObserver(ContentObserver observer) {
++        if (!isEnabled) {
++            return false;
++        }
++
++        return false;
++    }
++
++    public static boolean shouldSkipNotifyChange(Uri uri, @Nullable ContentObserver observer,
++                                                 @ContentResolver.NotifyFlags int flags) {
++        if (!isEnabled) {
++            return false;
++        }
++
++        return false;
++    }
++
++    // a helper class for keeping track of skipped ContentObservers and for delivering content
++    // change notifications to them manually (see shouldSkipRegisterContentObserver())
++    public static class ContentObserverList {
++        private final ArrayList<Pair<ContentObserver, ArrayList<Uri>>> list = new ArrayList<>();
++
++        public void add(ContentObserver observer, Uri uri) {
++            synchronized (list) {
++                for (var pair : list) {
++                    if (pair.first == observer) {
++                        pair.second.add(uri);
++                        return;
++                    }
++                }
++                var uris = new ArrayList<Uri>();
++                uris.add(uri);
++                list.add(Pair.create(observer, uris));
++            }
++        }
++
++        @Nullable
++        public boolean remove(ContentObserver observer) {
++            synchronized (list) {
++                for (int i = 0, m = list.size(); i < m; ++i) {
++                    var pair = list.get(i);
++                    if (pair.first == observer) {
++                        list.remove(i);
++                        return true;
++                    }
++                }
++
++                return false;
++            }
++        }
++
++        public void notifyAllObservers() {
++            final Pair<ContentObserver, ArrayList<Uri>>[] arr;
++            synchronized (list) {
++                arr = list.toArray(new Pair[0]);
++            }
++
++            new Handler(Looper.getMainLooper()).post(() -> {
++                int myUserId = UserHandle.myUserId();
++                for (var pair : arr) {
++                    var uris = Collections.unmodifiableList(pair.second);
++                    pair.first.dispatchChange(false, uris, 0, myUserId);
++                }
++            });
++        }
++
++        class Receiver extends BroadcastReceiver {
++            @Override
++            public void onReceive(Context context, Intent intent) {
++                Log.d("ContentChangeReceiver", intent.toString());
++                notifyAllObservers();
++            }
++        }
++
++        public void registerNotificationReceiver(Context ctx, String intentAction, String permission) {
++            var receiver = new Receiver();
++            var filter = new IntentFilter(intentAction);
++            ctx.registerReceiver(receiver, filter, permission, null, Context.RECEIVER_EXPORTED);
++        }
++    }
++}
+diff --git a/core/java/com/android/internal/app/RedirectedContentProvider.java b/core/java/com/android/internal/app/RedirectedContentProvider.java
+new file mode 100644
+index 0000000000..91d2a6121f
+--- /dev/null
++++ b/core/java/com/android/internal/app/RedirectedContentProvider.java
+@@ -0,0 +1,107 @@
++package com.android.internal.app;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.content.ContentProvider;
++import android.content.ContentValues;
++import android.database.Cursor;
++import android.net.Uri;
++import android.os.Bundle;
++import android.os.ParcelFileDescriptor;
++import android.util.Log;
++
++import java.util.Arrays;
++
++/**
++ * A base class for stubbed out or scoped content providers.
++ * Stubbed out providers are fully empty and immutable.
++ * Scoped providers export a subset of data from a different content provider and are expected to
++ * be immutable.
++ */
++public class RedirectedContentProvider extends ContentProvider {
++    protected String TAG;
++    protected boolean DEBUG;
++
++    protected String authorityOverride;
++
++    @Override
++    public boolean onCreate() {
++        DEBUG = Log.isLoggable(TAG, Log.DEBUG);
++        if (DEBUG) Log.d(TAG, "onCreate");
++        return true;
++    }
++
++    @Override
++    public final Cursor query(Uri uri, @Nullable String[] projection, @Nullable String selection,
++                              @Nullable String[] selectionArgs, @Nullable String sortOrder) {
++        if (DEBUG) Log.d(TAG, "query from " + getCallingPackage() + "; uri " + uri
++                + ", projection " + Arrays.toString(projection) + ", selection " + selection
++                + ", selectionArgs " + Arrays.toString(selectionArgs)
++                + ", sortOrder " + sortOrder);
++        return queryInner(uri, projection, selection, selectionArgs, sortOrder);
++    }
++
++    public Cursor queryInner(Uri uri, @Nullable String[] projection, @Nullable String selection,
++                             @Nullable String[] selectionArgs, @Nullable String sortOrder) {
++        return null;
++    }
++
++    @Override
++    public final String getType(Uri uri) {
++        if (DEBUG) Log.d(TAG, "getType from " + getCallingPackage() + "; uri " + uri);
++
++        // getType() call doesn't require any permission, can always forward it to the original provider
++        return requireContext().getContentResolver().getType(uri);
++    }
++
++    @Override
++    public final Uri insert(Uri uri, ContentValues values) {
++        if (DEBUG) Log.d(TAG, "insert from " + getCallingPackage() + "; uri " + uri + ", values " + values);
++        return null;
++    }
++
++    @Override
++    public final int delete(Uri uri, String selection, String[] selectionArgs) {
++        if (DEBUG) Log.d(TAG, "delete from " + getCallingPackage() + "; uri " + uri
++                + ", selection " + selection + ", selectionArgs " + Arrays.toString(selectionArgs));
++        return 0;
++    }
++
++    @Override
++    public final int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
++        if (DEBUG) Log.d(TAG, "update from " + getCallingPackage() + "; uri " + uri + ", values " + values
++                + ", selection " + selection + ", selectionArgs " + Arrays.toString(selectionArgs));
++        return 0;
++    }
++
++    @Nullable
++    @Override
++    public final ParcelFileDescriptor openFile(@NonNull Uri uri, @NonNull String mode) {
++        if (DEBUG) Log.d(TAG, "openFile from " + getCallingPackage() + "; uri " + uri + ", mode " + mode);
++        return null;
++    }
++
++    @Override
++    public Bundle call(@NonNull String method, @Nullable String arg, @Nullable Bundle extras) {
++        if (DEBUG) Log.d(TAG, "call from " + getCallingPackage() + "; method " + method + ", arg " + arg
++                + ", extras " + (extras != null ? extras.deepCopy() : extras));
++        return new Bundle();
++    }
++
++    @Override
++    public Uri validateIncomingUri(Uri uri) throws SecurityException {
++        if (DEBUG) Log.d(TAG, "validateIncomingUri: " + uri);
++        uri = uri.buildUpon().authority(authorityOverride).build();
++
++        uri = super.validateIncomingUri(uri);
++
++        if (DEBUG) Log.d(TAG, "override uri to: " + uri);
++
++        return uri;
++    }
++
++    @Override
++    protected final void validateIncomingAuthority(String authority) throws SecurityException {
++        if (DEBUG) Log.d(TAG, "validateIncomingAuthority: " + authority);
++    }
++}

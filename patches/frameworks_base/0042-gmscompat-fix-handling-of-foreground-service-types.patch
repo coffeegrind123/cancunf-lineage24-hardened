@@ -1,0 +1,214 @@
+From 837378ebe6a6b80db090f5c2e855b3784170e304 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 20 Oct 2026 02:53:31 +0000
+Subject: [PATCH 42/67] gmscompat: fix handling of foreground service types
+
+(cherry picked from commit 26b3616b59b29f1ca67c74d73e9cc5204c1d99e8)
+---
+ .../android/app/GmsCompatServiceHooks.java    | 116 ++++++++++++++++++
+ core/java/android/app/Service.java            |  22 ++--
+ .../pm/ext/GmsCompatPkgParsingHooks.java      |   7 +-
+ 3 files changed, 128 insertions(+), 17 deletions(-)
+ create mode 100644 core/java/android/app/GmsCompatServiceHooks.java
+
+diff --git a/core/java/android/app/GmsCompatServiceHooks.java b/core/java/android/app/GmsCompatServiceHooks.java
+new file mode 100644
+index 0000000000..4050edb8b2
+--- /dev/null
++++ b/core/java/android/app/GmsCompatServiceHooks.java
+@@ -0,0 +1,116 @@
++package android.app;
++
++import android.Manifest;
++import android.app.compat.gms.GmsCompat;
++import android.content.ComponentName;
++import android.content.pm.PackageManager;
++import android.content.pm.ServiceInfo;
++import android.content.pm.ServiceInfo.ForegroundServiceType;
++import android.util.Log;
++
++import com.android.internal.pm.pkg.component.ParsedServiceImpl;
++
++import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
++import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
++import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST;
++import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
++import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
++import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED;
++
++/** @hide */
++public class GmsCompatServiceHooks {
++    static final String TAG = "GmsCompatServiceHooks";
++
++    private static final int PROTECTED_TYPES = FOREGROUND_SERVICE_TYPE_CAMERA
++            | FOREGROUND_SERVICE_TYPE_LOCATION | FOREGROUND_SERVICE_TYPE_MICROPHONE;
++
++    public static void amendParsedService(ParsedServiceImpl s) {
++        final int origFgsType = s.getForegroundServiceType();
++        int fgsType = origFgsType;
++        if ((fgsType & FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED) != 0) {
++            // FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED requires special privileges
++            fgsType &= ~FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED;
++            fgsType |= FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
++        }
++        if ((fgsType & PROTECTED_TYPES) != 0) {
++            // fallback type in case the required permissions are missing
++            fgsType |= FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
++        }
++        if (fgsType != origFgsType) {
++            s.setForegroundServiceType(fgsType);
++        }
++    }
++
++    static int getFgsTypeForRetry(final int origFgsType) {
++        if (origFgsType == FOREGROUND_SERVICE_TYPE_MANIFEST) {
++            return 0;
++        }
++
++        if ((origFgsType & PROTECTED_TYPES) == 0) {
++            return 0;
++        }
++        // The policy for protected fgsTypes is too complex to check in translateFgsType() (and the
++        // check would be racy anyway), retry instead.
++        int fgsType = origFgsType & ~PROTECTED_TYPES;
++        if (fgsType == 0) {
++            fgsType |= FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
++        }
++        Log.i(TAG, "retrying startForeground with fgsType adjusted from "
++                + Integer.toHexString(origFgsType) + " to " + Integer.toHexString(fgsType));
++        return fgsType;
++    }
++
++    static int translateFgsType(Service service, @ForegroundServiceType final int origFgsType) {
++        int fgsType = origFgsType;
++
++        if (fgsType == FOREGROUND_SERVICE_TYPE_MANIFEST) {
++            PackageManager pm = service.getPackageManager();
++            var serviceComponent = new ComponentName(service, service.getClassName());
++            ServiceInfo serviceInfo;
++            try {
++                serviceInfo = pm.getServiceInfo(serviceComponent, 0);
++            } catch (PackageManager.NameNotFoundException e) {
++                Log.e(TAG, "unable to resolve FOREGROUND_SERVICE_TYPE_MANIFEST", e);
++                return origFgsType;
++            }
++            fgsType = serviceInfo.getForegroundServiceType();
++            if (fgsType == 0) {
++                return origFgsType;
++            }
++        }
++
++        if ((fgsType & FOREGROUND_SERVICE_TYPE_CAMERA) != 0) {
++            if (!GmsCompat.hasPermission(Manifest.permission.CAMERA)) {
++                fgsType &= ~FOREGROUND_SERVICE_TYPE_CAMERA;
++            }
++        }
++
++        if ((fgsType & FOREGROUND_SERVICE_TYPE_LOCATION) != 0) {
++            if (!GmsCompat.hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)) {
++                fgsType &= ~FOREGROUND_SERVICE_TYPE_LOCATION;
++            }
++        }
++
++        if ((fgsType & FOREGROUND_SERVICE_TYPE_MICROPHONE) != 0) {
++            if (!GmsCompat.hasPermission(Manifest.permission.RECORD_AUDIO)) {
++                fgsType &= ~FOREGROUND_SERVICE_TYPE_MICROPHONE;
++            }
++        }
++
++        if ((fgsType & FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED) != 0) {
++            fgsType &= ~FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED;
++            fgsType |= FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
++        }
++
++        if (fgsType == 0 && origFgsType != 0) {
++            fgsType = FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
++        }
++
++        if (origFgsType != fgsType) {
++            Log.i(TAG, "adjusted fgsType from " + Integer.toHexString(origFgsType) + " to "
++                    + Integer.toHexString(fgsType) + " for " + service.getClassName());
++        }
++
++        return fgsType;
++    }
++}
+diff --git a/core/java/android/app/Service.java b/core/java/android/app/Service.java
+index 94bb499c77..ab1930fee5 100644
+--- a/core/java/android/app/Service.java
++++ b/core/java/android/app/Service.java
+@@ -20,7 +20,6 @@ import static android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST;
+ import static android.os.Trace.TRACE_TAG_ACTIVITY_MANAGER;
+ import static android.text.TextUtils.formatSimple;
+ 
+-import android.Manifest;
+ import android.annotation.IntDef;
+ import android.annotation.NonNull;
+ import android.annotation.Nullable;
+@@ -772,6 +771,11 @@ public abstract class Service extends ContextWrapper implements ComponentCallbac
+      * @see #stopForeground(boolean)
+      */
+     public final void startForeground(int id, Notification notification) {
++        if (GmsCompat.isEnabled()) {
++            startForeground(id, notification, FOREGROUND_SERVICE_TYPE_MANIFEST);
++            return;
++        }
++
+         try {
+             final ComponentName comp = new ComponentName(this, mClassName);
+             mActivityManager.setServiceForeground(
+@@ -860,17 +864,7 @@ public abstract class Service extends ContextWrapper implements ComponentCallbac
+     public final void startForeground(int id, @NonNull Notification notification,
+             @RequiresPermission @ForegroundServiceType int foregroundServiceType) {
+         if (GmsCompat.isEnabled()) {
+-            if ((foregroundServiceType & ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) != 0) {
+-                if (!GmsCompat.hasPermission(Manifest.permission.RECORD_AUDIO)) {
+-                    foregroundServiceType &= ~ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+-                }
+-            }
+-
+-            if ((foregroundServiceType & ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) != 0) {
+-                if (!GmsCompat.hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+-                    foregroundServiceType &= ~ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+-                }
+-            }
++            foregroundServiceType = GmsCompatServiceHooks.translateFgsType(this, foregroundServiceType);
+         }
+ 
+         try {
+@@ -884,6 +878,10 @@ public abstract class Service extends ContextWrapper implements ComponentCallbac
+         } catch (SecurityException e) {
+             if (GmsCompat.isEnabled()) {
+                 Log.e(TAG, "fgsType: " + Integer.toHexString(foregroundServiceType), e);
++                int fgsType2 = GmsCompatServiceHooks.getFgsTypeForRetry(foregroundServiceType);
++                if (fgsType2 != 0) {
++                    startForeground(id, notification, fgsType2);
++                }
+                 return;
+             }
+             throw e;
+diff --git a/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java b/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java
+index 0db3f81389..5c9216efc1 100644
+--- a/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java
++++ b/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java
+@@ -3,8 +3,8 @@ package com.android.server.pm.ext;
+ import android.Manifest;
+ import android.annotation.CallSuper;
+ import android.annotation.Nullable;
++import android.app.GmsCompatServiceHooks;
+ import android.app.compat.gms.GmsCompat;
+-import android.content.pm.ServiceInfo;
+ import android.ext.PackageId;
+ import android.os.Bundle;
+ 
+@@ -70,9 +70,6 @@ public class GmsCompatPkgParsingHooks extends PackageParsingHooks {
+     @CallSuper
+     @Override
+     public void amendParsedService(ParsedServiceImpl s) {
+-        if (s.getForegroundServiceType() == ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED) {
+-            // FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED requires special privileges
+-            s.setForegroundServiceType(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+-        }
++        GmsCompatServiceHooks.amendParsedService(s);
+     }
+ }

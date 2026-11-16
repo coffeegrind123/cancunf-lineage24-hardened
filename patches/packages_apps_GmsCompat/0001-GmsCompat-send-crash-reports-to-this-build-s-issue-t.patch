@@ -1,0 +1,26 @@
+From 6b6d00475be6f8b5b2668d846b4d2e4dc0ad697b Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sun, 15 Nov 2026 19:20:48 +0000
+Subject: [PATCH] GmsCompat: send crash reports to this build's issue tracker
+
+GmsCompat on this LineageOS build is a port, so its crashes belong in
+the port's tracker, not GrapheneOS's.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/app/grapheneos/gmscompat/BinderGms2Gca.kt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/app/grapheneos/gmscompat/BinderGms2Gca.kt b/src/app/grapheneos/gmscompat/BinderGms2Gca.kt
+index be60a9c..a2d85ff 100644
+--- a/src/app/grapheneos/gmscompat/BinderGms2Gca.kt
++++ b/src/app/grapheneos/gmscompat/BinderGms2Gca.kt
+@@ -389,7 +389,7 @@ object BinderGms2Gca : IGms2Gca.Stub() {
+         intent.setPackage(LogViewerApp.getPackageName());
+ 
+         val reportAction = run {
+-            val url = "https://github.com/GrapheneOS/os-issue-tracker/issues"
++            val url = "https://github.com/coffeegrind123/cancunf-lineage24-hardened/issues"
+             val urlIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+             val label = ctx.getText(R.string.notif_gms_crash_report)
+             Notification.Action.Builder(null, label, activityPendingIntent(urlIntent)).build()

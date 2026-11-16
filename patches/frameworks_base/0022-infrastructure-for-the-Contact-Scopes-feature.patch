@@ -1,0 +1,828 @@
+From dc0f8273e329fa0aa0dacbca197e3bce74725169 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 16 May 2023 15:55:14 +0300
+Subject: [PATCH 22/67] infrastructure for the Contact Scopes feature
+
+(cherry picked from commit df9421c77902203383e28ad9b4a95c147ec9edc9)
+---
+ core/api/system-current.txt                   |  54 ++++++
+ .../java/android/app/ActivityThreadHooks.java |   2 +
+ core/java/android/app/Notification.java       |  13 ++
+ core/java/android/app/Person.java             |  15 ++
+ .../content/pm/AppPermissionUtils.java        |  16 ++
+ .../android/ext/cscopes/ContactScope.java     |  71 ++++++++
+ .../android/ext/cscopes/ContactScopesApi.java |  38 ++++
+ .../ext/cscopes/ContactScopesStorage.java     | 153 ++++++++++++++++
+ .../android/ext/cscopes/ContactsGroup.java    |  54 ++++++
+ .../android/internal/app/ContactScopes.java   | 167 ++++++++++++++++++
+ .../app/ContentProviderRedirector.java        |  16 ++
+ .../server/ext/PackageManagerHooks.java       |  12 ++
+ 12 files changed, 611 insertions(+)
+ create mode 100644 core/java/android/ext/cscopes/ContactScope.java
+ create mode 100644 core/java/android/ext/cscopes/ContactScopesApi.java
+ create mode 100644 core/java/android/ext/cscopes/ContactScopesStorage.java
+ create mode 100644 core/java/android/ext/cscopes/ContactsGroup.java
+ create mode 100644 core/java/com/android/internal/app/ContactScopes.java
+
+diff --git a/core/api/system-current.txt b/core/api/system-current.txt
+index 60edc866a4..9666660869 100644
+--- a/core/api/system-current.txt
++++ b/core/api/system-current.txt
+@@ -5857,6 +5857,60 @@ package android.ext {
+ 
+ }
+ 
++package android.ext.cscopes {
++
++  public final class ContactScope implements android.os.Parcelable {
++    ctor public ContactScope(int, long, @Nullable String, @Nullable String, @Nullable android.net.Uri);
++    method public int describeContents();
++    method public void writeToParcel(@NonNull android.os.Parcel, int);
++    field @NonNull public static final android.os.Parcelable.Creator<android.ext.cscopes.ContactScope> CREATOR;
++    field public static final int TYPE_CONTACT = 1; // 0x1
++    field public static final int TYPE_COUNT = 4; // 0x4
++    field public static final int TYPE_EMAIL = 3; // 0x3
++    field public static final int TYPE_GROUP = 0; // 0x0
++    field public static final int TYPE_NUMBER = 2; // 0x2
++    field @Nullable public final android.net.Uri detailsUri;
++    field public final long id;
++    field @Nullable public final String summary;
++    field @Nullable public final String title;
++    field public final int type;
++  }
++
++  public class ContactScopesApi {
++    method @NonNull public static android.content.Intent createConfigActivityIntent(@NonNull String);
++    field public static final String ACTION_NOTIFY_CONTENT_OBSERVERS = "android.ext.cscopes.action.NOTIFY_CONTENT_OBSERVERS";
++    field public static final String KEY_IDS = "ids";
++    field public static final String KEY_RESULT = "result";
++    field public static final String KEY_URIS = "uris";
++    field public static final String METHOD_GET_GROUPS = "get_groups";
++    field public static final String METHOD_GET_IDS_FROM_URIS = "get_ids_from_uris";
++    field public static final String METHOD_GET_VIEW_MODEL = "get_view_model";
++    field public static final String SCOPED_CONTACTS_PROVIDER_AUTHORITY = "com.android.contacts.scoped";
++  }
++
++  public final class ContactScopesStorage {
++    method public boolean add(int, long);
++    method @NonNull public static android.ext.cscopes.ContactScopesStorage deserialize(@NonNull android.content.pm.GosPackageState);
++    method public int getCount();
++    method @NonNull public long[] getIds(int);
++    method public static boolean isEmpty(@NonNull android.content.pm.GosPackageState);
++    method public boolean remove(int, long);
++    method @Nullable public byte[] serialize();
++    field public static final int MAX_COUNT_PER_PACKAGE = 100; // 0x64
++  }
++
++  public final class ContactsGroup implements android.os.Parcelable {
++    ctor public ContactsGroup(long, @Nullable String, @Nullable String);
++    method public int describeContents();
++    method public void writeToParcel(@NonNull android.os.Parcel, int);
++    field @NonNull public static final android.os.Parcelable.Creator<android.ext.cscopes.ContactsGroup> CREATOR;
++    field public final long id;
++    field @Nullable public final String summary;
++    field @Nullable public final String title;
++  }
++
++}
++
+ package android.ext.settings {
+ 
+   public class BoolSetting extends android.ext.settings.Setting<android.ext.settings.BoolSetting> {
+diff --git a/core/java/android/app/ActivityThreadHooks.java b/core/java/android/app/ActivityThreadHooks.java
+index 392111cdf5..71de482e3e 100644
+--- a/core/java/android/app/ActivityThreadHooks.java
++++ b/core/java/android/app/ActivityThreadHooks.java
+@@ -8,6 +8,7 @@ import android.os.Bundle;
+ import android.os.Process;
+ import android.util.Log;
+ 
++import com.android.internal.app.ContactScopes;
+ import com.android.internal.app.StorageScopesAppHooks;
+ import com.android.internal.gmscompat.GmsHooks;
+ import com.android.internal.util.Preconditions;
+@@ -85,6 +86,7 @@ class ActivityThreadHooks {
+             }
+         }
+         StorageScopesAppHooks.maybeEnable(state);
++        ContactScopes.maybeEnable(ctx, state);
+     }
+ 
+     static Service instantiateService(String className) {
+diff --git a/core/java/android/app/Notification.java b/core/java/android/app/Notification.java
+index 47d61adc2b..6498a6eb71 100644
+--- a/core/java/android/app/Notification.java
++++ b/core/java/android/app/Notification.java
+@@ -130,6 +130,7 @@ import android.widget.RemoteViews;
+ 
+ import com.android.internal.R;
+ import com.android.internal.annotations.VisibleForTesting;
++import com.android.internal.app.ContactScopes;
+ import com.android.internal.graphics.ColorUtils;
+ import com.android.internal.util.ArrayUtils;
+ import com.android.internal.util.ContrastColorUtil;
+@@ -6200,6 +6201,11 @@ public class Notification implements Parcelable
+          * @deprecated use {@link #addPerson(Person)}
+          */
+         public Builder addPerson(String uri) {
++            if (ContactScopes.isEnabled()) {
++                // See comment in Person.Builder#setUri()
++                return this;
++            }
++
+             addPerson(new Person.Builder().setUri(uri).build());
+             return this;
+         }
+@@ -6226,6 +6232,13 @@ public class Notification implements Parcelable
+          */
+         @NonNull
+         public Builder addPerson(Person person) {
++            if (ContactScopes.isEnabled()) {
++                if (person.getName() == null && person.getKey() == null) {
++                    // See comment in Person.Builder#setUri()
++                    return this;
++                }
++
++            }
+             mPersonList.add(person);
+             return this;
+         }
+diff --git a/core/java/android/app/Person.java b/core/java/android/app/Person.java
+index c7432c571e..76d97b42c3 100644
+--- a/core/java/android/app/Person.java
++++ b/core/java/android/app/Person.java
+@@ -23,6 +23,8 @@ import android.net.Uri;
+ import android.os.Parcel;
+ import android.os.Parcelable;
+ 
++import com.android.internal.app.ContactScopes;
++
+ import java.util.Objects;
+ import java.util.function.Consumer;
+ 
+@@ -258,6 +260,19 @@ public final class Person implements Parcelable {
+          */
+         @NonNull
+         public Person.Builder setUri(@Nullable String uri) {
++            if (ContactScopes.isEnabled()) {
++                // The app doesn't have direct access to the contact's uri when Contact Scopes is enabled.
++                //
++                // The Person object can be attached to a notification via Notification.Builder#addPerson.
++                // Before showing a notification, system_server checks whether the calling app has
++                // permission to access all uris that are attached to that notification. system_server
++                // doesn't show notifications that fail this permission check.
++                //
++                // Before November 2024 security patches, Person uris were exempted from these checks:
++                // https://android.googlesource.com/platform/frameworks/base/+/3a240992e42dc2c7d1920a8207b00935d0558b0d
++                return this;
++            }
++
+             mUri = uri;
+             return this;
+         }
+diff --git a/core/java/android/content/pm/AppPermissionUtils.java b/core/java/android/content/pm/AppPermissionUtils.java
+index 5e69870724..6d3a18f635 100644
+--- a/core/java/android/content/pm/AppPermissionUtils.java
++++ b/core/java/android/content/pm/AppPermissionUtils.java
+@@ -20,6 +20,7 @@ import android.annotation.NonNull;
+ import android.annotation.SystemApi;
+ import android.app.compat.gms.GmsCompat;
+ 
++import com.android.internal.app.ContactScopes;
+ import com.android.internal.app.StorageScopesAppHooks;
+ import com.android.internal.gmscompat.GmsHooks;
+ 
+@@ -42,6 +43,10 @@ public class AppPermissionUtils {
+             return true;
+         }
+ 
++        if (ContactScopes.shouldSpoofSelfPermissionCheck(permName)) {
++            return true;
++        }
++
+         if (GmsCompat.isEnabled()) {
+             if (GmsHooks.config().shouldSpoofSelfPermissionCheck(permName)) {
+                 return true;
+@@ -61,6 +66,10 @@ public class AppPermissionUtils {
+             return true;
+         }
+ 
++        if (ContactScopes.shouldSpoofSelfAppOpCheck(op)) {
++            return true;
++        }
++
+         return false;
+     }
+ 
+@@ -92,6 +101,13 @@ public class AppPermissionUtils {
+             }
+         }
+ 
++        if (ps.hasFlag(GosPackageStateFlag.CONTACT_SCOPES_ENABLED)) {
++            int permDflag = ContactScopes.getSpoofablePermissionDflag(perm);
++            if (permDflag != 0) {
++                return permDflag;
++            }
++        }
++
+         return 0;
+     }
+ 
+diff --git a/core/java/android/ext/cscopes/ContactScope.java b/core/java/android/ext/cscopes/ContactScope.java
+new file mode 100644
+index 0000000000..8565a233c3
+--- /dev/null
++++ b/core/java/android/ext/cscopes/ContactScope.java
+@@ -0,0 +1,71 @@
++package android.ext.cscopes;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.annotation.SystemApi;
++import android.net.Uri;
++import android.os.Parcel;
++import android.os.Parcelable;
++
++/** @hide */
++@SystemApi
++public final class ContactScope implements Parcelable {
++    public static final int TYPE_GROUP = 0;
++    public static final int TYPE_CONTACT = 1;
++    public static final int TYPE_NUMBER = 2;
++    public static final int TYPE_EMAIL = 3;
++    public static final int TYPE_COUNT = 4;
++
++    public final int type;
++    public final long id;
++
++    @Nullable
++    public final String title;
++    @Nullable
++    public final String summary;
++    @Nullable
++    public final Uri detailsUri;
++
++    public ContactScope(int type, long id, @Nullable String title, @Nullable String summary, @Nullable Uri detailsUri) {
++        this.type = type;
++        this.id = id;
++        this.title = title;
++        this.summary = summary;
++        this.detailsUri = detailsUri;
++    }
++
++    ContactScope(Parcel in) {
++        type = in.readInt();
++        id = in.readLong();
++        title = in.readString();
++        summary = in.readString();
++        detailsUri = in.readParcelable(Uri.class.getClassLoader(), Uri.class);
++    }
++
++    @Override
++    public void writeToParcel(@NonNull Parcel dest, int flags) {
++        dest.writeInt(type);
++        dest.writeLong(id);
++        dest.writeString(title);
++        dest.writeString(summary);
++        dest.writeParcelable(detailsUri, 0);
++    }
++
++    @NonNull
++    public static final Creator<ContactScope> CREATOR = new Creator<>() {
++        @Override
++        public ContactScope createFromParcel(Parcel in) {
++            return new ContactScope(in);
++        }
++
++        @Override
++        public ContactScope[] newArray(int size) {
++            return new ContactScope[size];
++        }
++    };
++
++    @Override
++    public int describeContents() {
++        return 0;
++    }
++}
+diff --git a/core/java/android/ext/cscopes/ContactScopesApi.java b/core/java/android/ext/cscopes/ContactScopesApi.java
+new file mode 100644
+index 0000000000..044ccfae94
+--- /dev/null
++++ b/core/java/android/ext/cscopes/ContactScopesApi.java
+@@ -0,0 +1,38 @@
++package android.ext.cscopes;
++
++import android.annotation.NonNull;
++import android.annotation.SystemApi;
++import android.content.ComponentName;
++import android.content.Intent;
++import android.provider.ContactsContract;
++
++/** @hide */
++@SystemApi
++public class ContactScopesApi {
++
++    public static final String ACTION_NOTIFY_CONTENT_OBSERVERS =
++            "android.ext.cscopes.action.NOTIFY_CONTENT_OBSERVERS";
++
++    public static final String SCOPED_CONTACTS_PROVIDER_AUTHORITY = ContactsContract.AUTHORITY + ".scoped";
++
++    // ScopedContactsProvider method IDs
++    public static final String METHOD_GET_IDS_FROM_URIS = "get_ids_from_uris";
++    public static final String METHOD_GET_VIEW_MODEL = "get_view_model";
++    public static final String METHOD_GET_GROUPS = "get_groups";
++
++    // keys for Bundles passed from/to ScopedContactsProvider methods
++    public static final String KEY_URIS = "uris";
++    public static final String KEY_IDS = "ids";
++    public static final String KEY_RESULT = "result";
++
++    @NonNull
++    public static Intent createConfigActivityIntent(@NonNull String targetPkg) {
++        var i = new Intent();
++        String pkg = "com.android.permissioncontroller";
++        i.setComponent(ComponentName.createRelative(pkg, ".cscopes.ContactScopesActivity"));
++        i.putExtra(Intent.EXTRA_PACKAGE_NAME, targetPkg);
++        return i;
++    }
++
++    private ContactScopesApi() {}
++}
+diff --git a/core/java/android/ext/cscopes/ContactScopesStorage.java b/core/java/android/ext/cscopes/ContactScopesStorage.java
+new file mode 100644
+index 0000000000..267aed4fdd
+--- /dev/null
++++ b/core/java/android/ext/cscopes/ContactScopesStorage.java
+@@ -0,0 +1,153 @@
++package android.ext.cscopes;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.annotation.SuppressLint;
++import android.annotation.SystemApi;
++import android.content.pm.GosPackageState;
++import android.util.Log;
++
++import com.android.internal.util.ArrayUtils;
++
++import java.io.ByteArrayInputStream;
++import java.io.ByteArrayOutputStream;
++import java.io.DataInputStream;
++import java.io.DataOutputStream;
++import java.io.IOException;
++
++/** @hide */
++@SystemApi
++public final class ContactScopesStorage {
++    private static final String TAG = "ContactScope";
++
++    private final long[][] idsByType;
++
++    @SuppressLint("MinMaxConstant")
++    public static final int MAX_COUNT_PER_PACKAGE = 100;
++
++    private ContactScopesStorage() {
++        this(new long[ContactScope.TYPE_COUNT][0]);
++    }
++
++    private ContactScopesStorage(long[][] idsByType) {
++        this.idsByType = idsByType;
++    }
++
++    @NonNull
++    public long[] getIds(int type) {
++        return idsByType[type];
++    }
++
++    public boolean add(int type, long id) {
++        if (getCount() >= MAX_COUNT_PER_PACKAGE) {
++            return false;
++        }
++
++        long[] cur = idsByType[type];
++        long[] upd = ArrayUtils.appendLong(cur, id);
++        if (cur == upd) {
++            return false;
++        }
++        idsByType[type] = upd;
++        return true;
++    }
++
++    public boolean remove(int type, long id) {
++        long[] cur = idsByType[type];
++        long[] upd = ArrayUtils.removeLong(cur, id);
++        if (cur == upd) {
++            return false;
++        }
++        idsByType[type] = upd;
++        return true;
++    }
++
++    public int getCount() {
++        int res = 0;
++        for (long[] arr : idsByType) {
++            res += arr.length;
++        }
++        return res;
++    }
++
++    private static final int VERSION = 0;
++
++    @Nullable
++    public byte[] serialize() {
++        int count = getCount();
++        if (count == 0) {
++            return null;
++        }
++
++        if (count > MAX_COUNT_PER_PACKAGE) {
++            throw new IllegalStateException();
++        }
++
++        var bos = new ByteArrayOutputStream(20 + (count * 8));
++
++        var s = new DataOutputStream(bos);
++
++        try {
++            s.writeByte(VERSION);
++
++            for (int type = ContactScope.TYPE_GROUP; type < ContactScope.TYPE_COUNT; ++type) {
++                long[] ids = this.idsByType[type];
++                int idsLen = ids.length;
++                if (idsLen == 0) {
++                    continue;
++                }
++                s.writeByte(type);
++                s.writeInt(idsLen);
++                for (int i = 0; i < idsLen; ++i) {
++                    s.writeLong(ids[i]);
++                }
++            }
++
++            return bos.toByteArray();
++        } catch (IOException e) {
++            throw new IllegalStateException(e);
++        }
++    }
++
++    public static boolean isEmpty(@NonNull GosPackageState gosPackageState) {
++        return gosPackageState.contactScopes == null;
++    }
++
++    @NonNull
++    public static ContactScopesStorage deserialize(@NonNull GosPackageState gosPackageState) {
++        byte[] ser = gosPackageState.contactScopes;
++        if (ser == null) {
++            return new ContactScopesStorage();
++        }
++
++        var s = new DataInputStream(new ByteArrayInputStream(ser));
++
++        try {
++            final int version = s.readByte();
++            if (version != VERSION) {
++                Log.e(TAG, "unexpected version " + version);
++                return new ContactScopesStorage();
++            }
++
++            long[][] idsByType = new long[ContactScope.TYPE_COUNT][0];
++
++            do {
++                int type = s.readByte();
++                int cnt = s.readInt();
++
++                long[] ids = new long[cnt];
++
++                for (int i = 0; i < cnt; ++i) {
++                    ids[i] = s.readLong();
++                }
++
++                idsByType[type] = ids;
++            } while (s.available() != 0);
++
++            return new ContactScopesStorage(idsByType);
++        } catch (IOException e) {
++            Log.e(TAG, "", e);
++            return new ContactScopesStorage();
++        }
++    }
++}
+diff --git a/core/java/android/ext/cscopes/ContactsGroup.java b/core/java/android/ext/cscopes/ContactsGroup.java
+new file mode 100644
+index 0000000000..7445fc22e6
+--- /dev/null
++++ b/core/java/android/ext/cscopes/ContactsGroup.java
+@@ -0,0 +1,54 @@
++package android.ext.cscopes;
++
++import android.annotation.NonNull;
++import android.annotation.Nullable;
++import android.annotation.SystemApi;
++import android.os.Parcel;
++import android.os.Parcelable;
++
++/** @hide */
++@SystemApi
++public final class ContactsGroup implements Parcelable {
++    public final long id;
++    @Nullable
++    public final String title;
++    @Nullable
++    public final String summary;
++
++    public ContactsGroup(long id, @Nullable String title, @Nullable String summary) {
++        this.id = id;
++        this.title = title;
++        this.summary = summary;
++    }
++
++    ContactsGroup(@NonNull Parcel in) {
++        id = in.readLong();
++        title = in.readString();
++        summary = in.readString();
++    }
++
++    @Override
++    public void writeToParcel(@NonNull Parcel dest, int flags) {
++        dest.writeLong(id);
++        dest.writeString(title);
++        dest.writeString(summary);
++    }
++
++    @Override
++    public int describeContents() {
++        return 0;
++    }
++
++    @NonNull
++    public static final Creator<ContactsGroup> CREATOR = new Creator<>() {
++        @Override
++        public ContactsGroup createFromParcel(Parcel in) {
++            return new ContactsGroup(in);
++        }
++
++        @Override
++        public ContactsGroup[] newArray(int size) {
++            return new ContactsGroup[size];
++        }
++    };
++}
+diff --git a/core/java/com/android/internal/app/ContactScopes.java b/core/java/com/android/internal/app/ContactScopes.java
+new file mode 100644
+index 0000000000..2ba307f820
+--- /dev/null
++++ b/core/java/com/android/internal/app/ContactScopes.java
+@@ -0,0 +1,167 @@
++package com.android.internal.app;
++
++import android.Manifest;
++import android.annotation.AnyThread;
++import android.app.AppOpsManager;
++import android.content.Context;
++import android.content.pm.GosPackageState;
++import android.content.pm.GosPackageStateFlag;
++import android.database.ContentObserver;
++import android.ext.DerivedPackageFlag;
++import android.ext.cscopes.ContactScopesApi;
++import android.net.Uri;
++import android.provider.ContactsContract;
++import android.provider.SimPhonebookContract;
++
++import com.android.internal.app.ContentProviderRedirector.ContentObserverList;
++
++public class ContactScopes {
++    private static volatile boolean isEnabled;
++    private static int gosPsDerivedFlags;
++
++    private static ContentObserverList contentObserverList;
++
++    public static boolean isEnabled() {
++        return isEnabled;
++    }
++
++    @AnyThread
++    public static void maybeEnable(Context ctx, GosPackageState ps) {
++        synchronized (ContactScopes.class) {
++            if (isEnabled) {
++                return;
++            }
++
++            if (ps.hasFlag(GosPackageStateFlag.CONTACT_SCOPES_ENABLED)) {
++                gosPsDerivedFlags = ps.derivedFlags;
++                {
++                    var col = new ContentObserverList();
++                    String intentAction = ContactScopesApi.ACTION_NOTIFY_CONTENT_OBSERVERS;
++                    // this broadcast is sent by PermissionController
++                    String permission = Manifest.permission.GRANT_RUNTIME_PERMISSIONS;
++                    col.registerNotificationReceiver(ctx, intentAction, permission);
++                    contentObserverList = col;
++                }
++                ContentProviderRedirector.enable();
++                isEnabled = true;
++            }
++        }
++    }
++
++    // call only if isEnabled is true
++    private static boolean shouldSpoofPermissionCheckInner(int permDflag) {
++        if (permDflag == 0) {
++            return false;
++        }
++        return (gosPsDerivedFlags & permDflag) != 0;
++    }
++
++    public static boolean shouldSpoofSelfPermissionCheck(String permName) {
++        if (!isEnabled) {
++            return false;
++        }
++        return shouldSpoofPermissionCheckInner(getSpoofablePermissionDflag(permName));
++    }
++
++    public static boolean shouldSpoofSelfAppOpCheck(int op) {
++        if (!isEnabled) {
++            return false;
++        }
++        return shouldSpoofPermissionCheckInner(getSpoofableAppOpPermissionDflag(op));
++    }
++
++    public static boolean maybeInterceptRegisterContentObserver(Uri uri, ContentObserver observer) {
++        if (!isEnabled) {
++            return false;
++        }
++
++        if (isContactsUri(uri)) {
++            contentObserverList.add(observer, uri);
++            return true;
++        }
++
++        return false;
++    }
++
++    public static boolean maybeInterceptUnregisterContentObserver(ContentObserver observer) {
++        if (!isEnabled) {
++            return false;
++        }
++
++        return contentObserverList.remove(observer);
++    }
++
++    public static boolean shouldSkipNotifyChange(Uri uri) {
++        if (!isEnabled) {
++            return false;
++        }
++
++        return isContactsUri(uri);
++    }
++
++    public static boolean isContactsUri(Uri uri) {
++        return isContactsUriAuthority(uri.getAuthority());
++    }
++
++    public static boolean isContactsUriAuthority(String authority) {
++        if (authority == null) {
++            return false;
++        }
++        switch (authority) {
++            case ContactsContract.AUTHORITY:
++            case SimPhonebookContract.AUTHORITY:
++            case ICC_PROVIDER_AUTHORITY:
++                return true;
++        }
++        return false;
++    }
++
++    // legacy SIM phonebook provider
++    public static final String ICC_PROVIDER_AUTHORITY = "icc";
++
++    public static String maybeTranslateAuthority(String auth) {
++        if (!isEnabled) {
++            return null;
++        }
++
++        if (ContactsContract.AUTHORITY.equals(auth)) {
++            return ContactScopesApi.SCOPED_CONTACTS_PROVIDER_AUTHORITY;
++        }
++
++        if (SimPhonebookContract.AUTHORITY.equals(auth)) {
++            return SimPhonebookContract.AUTHORITY + ".stub";
++        }
++
++        if (ICC_PROVIDER_AUTHORITY.equals(auth)) {
++            return ICC_PROVIDER_AUTHORITY + ".stub";
++        }
++
++        return null;
++    }
++
++    public static int getSpoofablePermissionDflag(String permName) {
++        switch (permName) {
++            case Manifest.permission.READ_CONTACTS:
++                return DerivedPackageFlag.HAS_READ_CONTACTS_DECLARATION;
++            case Manifest.permission.WRITE_CONTACTS:
++                return DerivedPackageFlag.HAS_WRITE_CONTACTS_DECLARATION;
++            case Manifest.permission.GET_ACCOUNTS:
++                return DerivedPackageFlag.HAS_GET_ACCOUNTS_DECLARATION;
++            default:
++                return 0;
++        }
++    }
++
++    private static int getSpoofableAppOpPermissionDflag(int op) {
++        switch (op) {
++            case AppOpsManager.OP_READ_CONTACTS:
++                return DerivedPackageFlag.HAS_READ_CONTACTS_DECLARATION;
++            case AppOpsManager.OP_WRITE_CONTACTS:
++                return DerivedPackageFlag.HAS_WRITE_CONTACTS_DECLARATION;
++            case AppOpsManager.OP_GET_ACCOUNTS:
++                return DerivedPackageFlag.HAS_GET_ACCOUNTS_DECLARATION;
++            default:
++                return 0;
++        }
++    }
++}
+diff --git a/core/java/com/android/internal/app/ContentProviderRedirector.java b/core/java/com/android/internal/app/ContentProviderRedirector.java
+index 53931c8d55..a326ad7bd1 100644
+--- a/core/java/com/android/internal/app/ContentProviderRedirector.java
++++ b/core/java/com/android/internal/app/ContentProviderRedirector.java
+@@ -32,6 +32,10 @@ public class ContentProviderRedirector {
+ 
+         String t = null;
+ 
++        if (t == null) {
++            t = ContactScopes.maybeTranslateAuthority(auth);
++        }
++
+         return t != null ? t : auth;
+     }
+ 
+@@ -43,6 +47,10 @@ public class ContentProviderRedirector {
+             return false;
+         }
+ 
++        if (ContactScopes.maybeInterceptRegisterContentObserver(uri, observer)) {
++            return true;
++        }
++
+         return false;
+     }
+ 
+@@ -51,6 +59,10 @@ public class ContentProviderRedirector {
+             return false;
+         }
+ 
++        if (ContactScopes.maybeInterceptUnregisterContentObserver(observer)) {
++            return true;
++        }
++
+         return false;
+     }
+ 
+@@ -60,6 +72,10 @@ public class ContentProviderRedirector {
+             return false;
+         }
+ 
++        if (ContactScopes.shouldSkipNotifyChange(uri)) {
++            return true;
++        }
++
+         return false;
+     }
+ 
+diff --git a/services/core/java/com/android/server/ext/PackageManagerHooks.java b/services/core/java/com/android/server/ext/PackageManagerHooks.java
+index d3c8d73f01..90185f46d1 100644
+--- a/services/core/java/com/android/server/ext/PackageManagerHooks.java
++++ b/services/core/java/com/android/server/ext/PackageManagerHooks.java
+@@ -6,6 +6,7 @@ import android.app.AppBindArgs;
+ import android.content.Context;
+ import android.content.pm.ApplicationInfo;
+ import android.content.pm.GosPackageState;
++import android.content.pm.GosPackageStateFlag;
+ import android.content.pm.PackageManager;
+ import android.content.pm.PackageManagerInternal;
+ import android.ext.PackageId;
+@@ -14,6 +15,7 @@ import android.os.UserHandle;
+ import android.util.ArraySet;
+ import android.util.Slog;
+ 
++import com.android.internal.app.ContactScopes;
+ import com.android.server.pm.Computer;
+ import com.android.server.pm.GosPackageStatePmHooks;
+ import com.android.server.pm.ext.PackageHooks;
+@@ -47,6 +49,16 @@ public class PackageManagerHooks {
+     public static boolean shouldBlockGrantRuntimePermission(
+             PackageManagerInternal pm, String permName, String packageName, int userId)
+     {
++        if (ContactScopes.getSpoofablePermissionDflag(permName) != 0) {
++            GosPackageState gosPs = pm.getGosPackageState(packageName, userId);
++            if (gosPs.hasFlag(GosPackageStateFlag.CONTACT_SCOPES_ENABLED)) {
++                String msg = "refusing to grant " + permName + " to " + packageName +
++                        ": Contact Scopes is enabled";
++                Slog.d("PermissionManager", msg);
++                return true;
++            }
++        }
++
+         return false;
+     }
+ 

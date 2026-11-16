@@ -1,0 +1,27 @@
+From e24f571bc8cb225dfd52700cf645f624a3db3d6c Mon Sep 17 00:00:00 2001
+From: inthewaves <inthewaves@pm.me>
+Date: Wed, 18 Feb 2026 21:02:52 -0800
+Subject: [PATCH 27/67] [temporary] gmscompat: add TODO for USE_ICC_AUTH for
+ RCS in Android 17
+
+(cherry picked from commit 6f19617ab360c75cbf947b3a99874d5ea1ad7cc2)
+---
+ core/java/android/app/ContextImpl.java | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/core/java/android/app/ContextImpl.java b/core/java/android/app/ContextImpl.java
+index 905ccafc00..94c7713a80 100644
+--- a/core/java/android/app/ContextImpl.java
++++ b/core/java/android/app/ContextImpl.java
+@@ -2628,6 +2628,11 @@ class ContextImpl extends Context {
+             throw new IllegalArgumentException("permission is null");
+         }
+ 
++        // TODO: In Android 17, READ_PRIVILEGED_PHONE_STATE will no longer be accepted for
++        //  TelephonyManager#getIccAuthentication. However, Manifest.permission.USE_ICC_AUTH was
++        //  introduced. getIccAuthentication can accept this new permission along with preexisting
++        //  Manifest.permission.USE_ICC_AUTH_WITH_DEVICE_IDENTIFIER. Need to pay attention to how
++        //  GmsCore uses USE_ICC_AUTH or USE_ICC_AUTH_WITH_DEVICE_IDENTIFIER.
+         if (GmsCompat.isGmsCore() &&
+                 android.Manifest.permission.READ_PRIVILEGED_PHONE_STATE.equals(permission)) {
+             if (Log.isLoggable(TAG_SPOOF, Log.VERBOSE)) {

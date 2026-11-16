@@ -1,0 +1,112 @@
+From 75b47680c97fce2ba0286e878afb0770cc1d04e4 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 12 Aug 2024 17:45:43 +0300
+Subject: [PATCH 3/6] add Private Space sandboxed Google Play link
+
+It's added to Private Space screen instead of the Apps screen (where regular and work profile links
+are) to avoid revealing whether the Private Space is present when the "Hide when locked" Private
+Space option is enabled.
+
+(cherry picked from commit c455bb78afcfaa63314f0740ba5feece76fb5b98)
+---
+ res/xml/private_space_settings.xml            |  5 +++
+ .../applications/GmsCompatAppController.java  | 41 +++++++++++++------
+ 2 files changed, 34 insertions(+), 12 deletions(-)
+
+diff --git a/res/xml/private_space_settings.xml b/res/xml/private_space_settings.xml
+index e444c80dad..80a8658df5 100644
+--- a/res/xml/private_space_settings.xml
++++ b/res/xml/private_space_settings.xml
+@@ -56,6 +56,11 @@
+             settings:controller="com.android.settings.privatespace.HidePrivateSpaceSummaryController"
+             settings:searchable="false" />
+ 
++        <Preference
++            android:key="sandboxed_google_play_private_space"
++            android:title="@string/sandboxed_google_play"
++            settings:controller="com.android.settings.applications.GmsCompatAppController"/>
++
+     </PreferenceCategory>
+ 
+     <PreferenceCategory
+diff --git a/src/com/android/settings/applications/GmsCompatAppController.java b/src/com/android/settings/applications/GmsCompatAppController.java
+index 32fe7d05e6..4b978a6628 100644
+--- a/src/com/android/settings/applications/GmsCompatAppController.java
++++ b/src/com/android/settings/applications/GmsCompatAppController.java
+@@ -1,16 +1,19 @@
+ package com.android.settings.applications;
+ 
++import android.annotation.Nullable;
+ import android.app.compat.gms.GmsCompat;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.os.UserHandle;
+ import android.text.TextUtils;
++import android.util.Log;
+ 
+ import androidx.preference.Preference;
+ 
+ import com.android.internal.gmscompat.GmsCompatApp;
+ import com.android.internal.gmscompat.GmsInfo;
+ import com.android.settings.core.BasePreferenceController;
++import com.android.settings.privatespace.PrivateSpaceMaintainer;
+ 
+ public class GmsCompatAppController extends BasePreferenceController {
+ 
+@@ -18,14 +21,28 @@ public class GmsCompatAppController extends BasePreferenceController {
+         super(context, key);
+     }
+ 
++    @Nullable
++    private UserHandle getUser() {
++        if ("sandboxed_google_play_private_space".equals(getPreferenceKey())) {
++            return PrivateSpaceMaintainer.getInstance(mContext).getPrivateProfileHandle();
++        }
++
++        UserHandle workProfileUser = getWorkProfileUser();
++        if (workProfileUser != null) {
++            return workProfileUser;
++        }
++
++        return mContext.getUser();
++    }
++
+     @Override
+     public int getAvailabilityStatus() {
+-        UserHandle workProfile = getWorkProfileUser();
+-        int userId = workProfile != null ?
+-                workProfile.getIdentifier() :
+-                UserHandle.myUserId();
++        UserHandle user = getUser();
++        if (user == null) {
++            return DISABLED_FOR_USER;
++        }
+ 
+-        return GmsCompat.isEnabledFor(GmsInfo.PACKAGE_GMS_CORE, userId) ?
++        return GmsCompat.isEnabledFor(GmsInfo.PACKAGE_GMS_CORE, user.getIdentifier()) ?
+                 AVAILABLE : DISABLED_FOR_USER;
+     }
+ 
+@@ -34,15 +51,15 @@ public class GmsCompatAppController extends BasePreferenceController {
+         if (!TextUtils.equals(preference.getKey(), getPreferenceKey())) {
+             return false;
+         }
+-        Intent intent = new Intent(GmsCompatApp.PKG_NAME + ".SETTINGS_LINK");
+-        intent.setPackage(GmsCompatApp.PKG_NAME);
+ 
+-        UserHandle workProfile = getWorkProfileUser();
+-        if (workProfile != null) {
+-            mContext.startActivityAsUser(intent, workProfile);
+-        } else {
+-            mContext.startActivity(intent);
++        UserHandle user = getUser();
++        if (user == null) {
++            throw new IllegalStateException("getUser() returned null, key: " + getPreferenceKey());
+         }
++
++        Intent intent = new Intent(GmsCompatApp.PKG_NAME + ".SETTINGS_LINK");
++        intent.setPackage(GmsCompatApp.PKG_NAME);
++        mContext.startActivityAsUser(intent, user);
+         return true;
+     }
+ }

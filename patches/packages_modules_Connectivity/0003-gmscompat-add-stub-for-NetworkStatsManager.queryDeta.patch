@@ -1,0 +1,45 @@
+From 86fed7df8685b08f645b7475b09fa0e2d6060410 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 8 May 2026 06:13:05 +0000
+Subject: [PATCH 3/4] gmscompat: add stub for
+ NetworkStatsManager.queryDetailsForUidTag()
+
+(cherry picked from commit bd2328135d244e7ad4f913e0e6a8e237430f1fe1)
+---
+ .../android/app/usage/NetworkStatsManager.java   | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/framework-t/src/android/app/usage/NetworkStatsManager.java b/framework-t/src/android/app/usage/NetworkStatsManager.java
+index 4d05616970..1cc5b871b4 100644
+--- a/framework-t/src/android/app/usage/NetworkStatsManager.java
++++ b/framework-t/src/android/app/usage/NetworkStatsManager.java
+@@ -33,6 +33,7 @@ import android.annotation.RequiresPermission;
+ import android.annotation.SystemApi;
+ import android.annotation.SystemService;
+ import android.annotation.WorkerThread;
++import android.app.compat.gms.GmsCompat;
+ import android.app.usage.NetworkStats.Bucket;
+ import android.compat.annotation.UnsupportedAppUsage;
+ import android.content.Context;
+@@ -756,8 +757,19 @@ public class NetworkStatsManager {
+     @WorkerThread
+     public NetworkStats queryDetailsForUidTag(int networkType, @Nullable String subscriberId,
+             long startTime, long endTime, int uid, int tag) throws SecurityException {
+-        return queryDetailsForUidTagState(networkType, subscriberId, startTime, endTime, uid,
+-            tag, NetworkStats.Bucket.STATE_ALL);
++        try {
++            return queryDetailsForUidTagState(networkType, subscriberId, startTime, endTime, uid,
++                tag, NetworkStats.Bucket.STATE_ALL);
++        } catch (SecurityException e) {
++            if (GmsCompat.isEnabled()) {
++                // GmsCore null-checks the return value despite the method being marked as non-null.
++                // An alternative to returning null is to make a stub instance of NetworkStats, but
++                // it's complex because of the way NetworkStats is implemented.
++                //noinspection DataFlowIssue
++                return null;
++            }
++            throw e;
++        }
+     }
+ 
+     /**

@@ -1,0 +1,33 @@
+From 3700bb115b25715c84e3d51a205bc56c3ac7e33c Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Thu, 15 Oct 2026 15:19:21 +0000
+Subject: [PATCH 40/67] gmscompat: add missing unbindService() in
+ SynchronousServiceBinding
+
+(cherry picked from commit 1ead428547099c4af83882673f26bd166f3232d2)
+---
+ .../gmscompat/util/SynchronousServiceBinding.java     | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java b/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java
+index 0373b4e6ec..9709bf4224 100644
+--- a/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java
++++ b/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java
+@@ -191,8 +191,15 @@ public abstract class SynchronousServiceBinding<T> implements IBinder.DeathRecip
+                 if (isPermanent) {
+                     bindFlags |= Context.BIND_ABOVE_CLIENT;
+                 }
+-                boolean bound = context.bindServiceAsUser(serviceIntent, connection, bindFlags,
+-                        serviceConnectionHandler, context.getUser());
++                boolean bound;
++                try {
++                    bound = context.bindServiceAsUser(serviceIntent, connection, bindFlags,
++                            serviceConnectionHandler, context.getUser());
++                } catch (SecurityException e) {
++                    Log.e(logTag, "", e);
++                    context.unbindService(connection);
++                    throw e;
++                }
+                 if (!bound) {
+                     Log.e(logTag, "bindService() failed");
+                     context.unbindService(connection);

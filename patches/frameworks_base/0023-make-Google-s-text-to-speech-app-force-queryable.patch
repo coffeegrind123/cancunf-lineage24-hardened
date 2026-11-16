@@ -1,0 +1,43 @@
+From b0e2fbc98c0b743119ec721a47db716f74753b12 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 25 Nov 2024 17:46:55 +0200
+Subject: [PATCH 23/67] make Google's text-to-speech app force-queryable
+
+Google TTS app is forceQueryable on stock OS. Third-party apps expect to be able to query it without
+holding the QUERY_ALL_PACKAGES permission.
+
+(cherry picked from commit 16b06e231cfb239fd76c2244998f6721a732d9fe)
+---
+ services/core/java/com/android/server/pm/AppsFilterImpl.java | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/pm/AppsFilterImpl.java b/services/core/java/com/android/server/pm/AppsFilterImpl.java
+index 261917a25f..2a9ba3453f 100644
+--- a/services/core/java/com/android/server/pm/AppsFilterImpl.java
++++ b/services/core/java/com/android/server/pm/AppsFilterImpl.java
+@@ -48,6 +48,7 @@ import android.content.pm.PackageManager;
+ import android.content.pm.PackageManagerInternal;
+ import android.content.pm.SigningDetails;
+ import android.content.pm.UserInfo;
++import android.ext.PackageId;
+ import android.os.Handler;
+ import android.os.SystemClock;
+ import android.os.SystemProperties;
+@@ -606,7 +607,8 @@ public final class AppsFilterImpl extends AppsFilterLocked implements Watchable,
+             }
+         }
+ 
+-        final boolean isGmsApp = GmsCompat.isEnabledFor(PackageExt.get(newPkg).getPackageId(), newPkg.getPackageName(), newPkgSetting.isPrivileged());
++        final int packageId = PackageExt.get(newPkg).getPackageId();
++        final boolean isGmsApp = GmsCompat.isEnabledFor(packageId, newPkg.getPackageName(), newPkgSetting.isPrivileged());
+ 
+         final boolean newIsForceQueryable;
+         synchronized (mForceQueryableLock) {
+@@ -615,6 +617,7 @@ public final class AppsFilterImpl extends AppsFilterLocked implements Watchable,
+                             || newPkgSetting.isForceQueryableOverride() /* adb override */
+                             || (newPkg.isForceQueryable() && isMicrogSigned(newPkg))
+                             || isGmsApp
++                            || packageId == PackageId.G_TEXT_TO_SPEECH
+                             || (newPkgSetting.isSystem() && (mSystemAppsQueryable
+                             || newPkg.isForceQueryable()
+                             || ArrayUtils.contains(mForceQueryableByDevicePackageNames,

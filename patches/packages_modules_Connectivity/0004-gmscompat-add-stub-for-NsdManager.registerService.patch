@@ -1,0 +1,26 @@
+From 925ca0fa67b79dd8c01ac56dc26d76c3f3157c70 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 22 Jun 2026 12:43:31 +0000
+Subject: [PATCH 4/4] gmscompat: add stub for NsdManager.registerService()
+
+NsdManager.registerService() is now protected by the ACCESS_LOCAL_NETWORK permission.
+
+(cherry picked from commit 5fa24474a8bf30c064e813865d553b7b25de61c5)
+---
+ framework-t/src/android/net/nsd/NsdManager.java | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/framework-t/src/android/net/nsd/NsdManager.java b/framework-t/src/android/net/nsd/NsdManager.java
+index 7c2c183d30..1161ada320 100644
+--- a/framework-t/src/android/net/nsd/NsdManager.java
++++ b/framework-t/src/android/net/nsd/NsdManager.java
+@@ -1914,6 +1914,9 @@ public final class NsdManager {
+             mService.registerService(key, advertisingRequest);
+         } catch (RemoteException e) {
+             e.rethrowFromSystemServer();
++        } catch (SecurityException e) {
++            android.app.compat.gms.GmsCompat.catchOrRethrow(e);
++            new NsdCallbackImpl(mHandler).onRegisterServiceFailed(key, FAILURE_PERMISSION_DENIED);
+         }
+     }
+ 

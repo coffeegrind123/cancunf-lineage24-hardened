@@ -1,0 +1,75 @@
+From a0962ddcd24bd8d66a0f1c6bf56492544826aa3c Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 18 Dec 2023 14:54:30 +0200
+Subject: [PATCH 48/67] define READ_DEVICE_SERIAL_NUMBER permission for
+ Build.getSerial() access
+
+Build.getSerial() is protected with the very broad READ_PRIVILEGED_PHONE_STATE permission.
+
+Android Auto needs Build.getSerial() in some cases, but doesn't need most of the other privileges
+that READ_PRIVILEGED_PHONE_STATE grants.
+
+(cherry picked from commit 8ac155916914c159fdc31a98dc657b869adc2078)
+---
+ core/res/AndroidManifest.xml                   |  4 ++++
+ .../os/DeviceIdentifiersPolicyService.java     | 18 +++++++++++++++---
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index 60a435476d..e1898470ef 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -3463,6 +3463,10 @@
+       android:protectionLevel="signature|privileged"
+       android:featureFlag="com.android.internal.telephony.flags.new_sim_auth_permission" />
+ 
++    <!--- @hide -->
++    <permission android:name="android.permission.READ_DEVICE_SERIAL_NUMBER"
++        android:protectionLevel="internal" />
++
+     <!-- @SystemApi Allows read access to emergency number information for ongoing calls or SMS
+          sessions.
+          @hide Used internally. -->
+diff --git a/services/core/java/com/android/server/os/DeviceIdentifiersPolicyService.java b/services/core/java/com/android/server/os/DeviceIdentifiersPolicyService.java
+index 61f253e6cc..a8c021a055 100644
+--- a/services/core/java/com/android/server/os/DeviceIdentifiersPolicyService.java
++++ b/services/core/java/com/android/server/os/DeviceIdentifiersPolicyService.java
+@@ -16,6 +16,7 @@
+ 
+ package com.android.server.os;
+ 
++import android.Manifest;
+ import android.annotation.NonNull;
+ import android.annotation.Nullable;
+ import android.content.Context;
+@@ -26,6 +27,7 @@ import android.os.IDeviceIdentifiersPolicyService;
+ import android.os.RemoteException;
+ import android.os.SystemProperties;
+ import android.os.UserHandle;
++import android.util.Slog;
+ 
+ import com.android.internal.telephony.TelephonyPermissions;
+ import com.android.server.LocalServices;
+@@ -75,9 +77,19 @@ public final class DeviceIdentifiersPolicyService extends SystemService {
+                                 + Binder.getCallingUid());
+             }
+ 
+-            if (!TelephonyPermissions.checkCallingOrSelfReadDeviceIdentifiers(mContext,
+-                    callingPackage, callingFeatureId, "getSerial")) {
+-                return Build.UNKNOWN;
++            try {
++                if (!TelephonyPermissions.checkCallingOrSelfReadDeviceIdentifiers(mContext,
++                        callingPackage, callingFeatureId, "getSerial")) {
++                    return Build.UNKNOWN;
++                }
++            } catch (SecurityException e) {
++                String perm = Manifest.permission.READ_DEVICE_SERIAL_NUMBER;
++                if (mContext.checkCallingPermission(perm) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
++                    Slog.d(DeviceIdentifiersPolicyService.class.getSimpleName(),
++                            callingPackage + " has " + perm + ", allowed serial number access");
++                } else {
++                    throw e;
++                }
+             }
+             return SystemProperties.get("ro.serialno", Build.UNKNOWN);
+         }

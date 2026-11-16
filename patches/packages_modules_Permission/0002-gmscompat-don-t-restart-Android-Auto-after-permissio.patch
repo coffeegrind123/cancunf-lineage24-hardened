@@ -1,0 +1,52 @@
+From 677fa4ba9ae9c53215389f92d6e2ce1d695c5796 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 18 Dec 2023 15:31:38 +0200
+Subject: [PATCH 2/2] gmscompat: don't restart Android Auto after permission
+ grants by default
+
+Adapted: dropped the OTHER_SENSORS clause. That GrapheneOS special
+runtime permission is not part of this build, so the reference
+does not compile and the condition could never match.
+
+(cherry picked from commit 5e19d6afd49bc6e40bca28362724755d8a7c7023)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../permission/utils/KotlinUtils.kt             | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/PermissionController/src/com/android/permissioncontroller/permission/utils/KotlinUtils.kt b/PermissionController/src/com/android/permissioncontroller/permission/utils/KotlinUtils.kt
+index 86e5d495e0..ab996c7411 100644
+--- a/PermissionController/src/com/android/permissioncontroller/permission/utils/KotlinUtils.kt
++++ b/PermissionController/src/com/android/permissioncontroller/permission/utils/KotlinUtils.kt
+@@ -60,6 +60,7 @@ import android.content.pm.PermissionGroupInfo
+ import android.content.pm.PermissionInfo
+ import android.content.pm.ResolveInfo
+ import android.content.res.Resources
++import android.ext.PackageId
+ import android.graphics.Bitmap
+ import android.graphics.Canvas
+ import android.graphics.drawable.Drawable
+@@ -1075,14 +1076,14 @@ object KotlinUtils {
+         }
+ 
+         if (GmsCompat.isEnabledFor(pkgInfo.packageName, user.identifier)) {
+-            // in many cases, GMS needs a restart to properly handle permission grants
+-            if (
+-                // Google Search app handles permission grants properly.
+-                // (GmsInfo.PACKAGE_GSA is inaccessible here)
+-                pkgInfo.packageName != "com.google.android.googlequicksearchbox"
+-                // Play Store asks for POST_NOTIFICATIONS on first launch
+-                && perm.name != POST_NOTIFICATIONS
+-            ) {
++            // in many cases, GMS components need a restart to properly handle permission grants
++            val skipRestart =
++                pkgInfo.packageName == PackageId.G_SEARCH_APP_NAME
++                || (pkgInfo.packageName == PackageId.ANDROID_AUTO_NAME
++                        && perm.name != Manifest.permission.RECORD_AUDIO)
++                || perm.name == POST_NOTIFICATIONS
++
++            if (!skipRestart) {
+                 shouldKill = true
+             }
+         }

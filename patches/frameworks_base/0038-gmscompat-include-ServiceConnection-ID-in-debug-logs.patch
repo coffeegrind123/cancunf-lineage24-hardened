@@ -1,0 +1,61 @@
+From 53b0f1574d95909696535634684aabb9a1c8e7d3 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 13 Oct 2026 13:12:50 +0000
+Subject: [PATCH 38/67] gmscompat: include ServiceConnection ID in debug logs
+
+(cherry picked from commit ddbee5569c601b5397c7666fc17946066a7b2cda)
+---
+ core/java/android/app/LoadedApk.java                   | 6 +++---
+ core/java/com/android/internal/gmscompat/GmcDebug.java | 4 ++--
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/core/java/android/app/LoadedApk.java b/core/java/android/app/LoadedApk.java
+index c7a249605f..3dc64ec9d1 100644
+--- a/core/java/android/app/LoadedApk.java
++++ b/core/java/android/app/LoadedApk.java
+@@ -2481,7 +2481,7 @@ public final class LoadedApk {
+             // If there was an old service, it is now disconnected.
+             if (old != null) {
+                 if (GmsCompat.isEnabled()) {
+-                    GmcDebug.maybeLogServiceConnCallback("onServiceDisconnected_old", name);
++                    GmcDebug.maybeLogServiceConnCallback(mConnection, "onServiceDisconnected_old", name);
+                 }
+                 mConnection.onServiceDisconnected(name);
+             }
+@@ -2502,7 +2502,7 @@ public final class LoadedApk {
+                 }
+             }
+             if (GmsCompat.isEnabled()) {
+-                GmcDebug.maybeLogServiceConnCallback(op, name);
++                GmcDebug.maybeLogServiceConnCallback(mConnection, op, name);
+             }
+         }
+ 
+@@ -2519,7 +2519,7 @@ public final class LoadedApk {
+             }
+ 
+             if (GmsCompat.isEnabled()) {
+-                GmcDebug.maybeLogServiceConnCallback("onServiceDisconnected", name);
++                GmcDebug.maybeLogServiceConnCallback(mConnection, "onServiceDisconnected", name);
+             }
+ 
+             mConnection.onServiceDisconnected(name);
+diff --git a/core/java/com/android/internal/gmscompat/GmcDebug.java b/core/java/com/android/internal/gmscompat/GmcDebug.java
+index 4854ef21e8..5af762433e 100644
+--- a/core/java/com/android/internal/gmscompat/GmcDebug.java
++++ b/core/java/com/android/internal/gmscompat/GmcDebug.java
+@@ -82,12 +82,12 @@ public class GmcDebug {
+         Log.v(LOG_TAG, "conn: " + System.identityHashCode(conn), new Throwable());
+     }
+ 
+-    public static void maybeLogServiceConnCallback(String name, ComponentName cn) {
++    public static void maybeLogServiceConnCallback(ServiceConnection conn, String name, ComponentName cn) {
+         String LOG_TAG = "GmcServiceConnCb";
+         if (!Log.isLoggable(LOG_TAG, Log.VERBOSE)) {
+             return;
+         }
+-        Log.v(LOG_TAG, name + ", " + cn.toShortString());
++        Log.v(LOG_TAG, "conn: " + System.identityHashCode(conn) + ", " + name + ", " + cn.toShortString());
+     }
+ 
+     public static void maybeLogSendBroadcast(Intent intent, String receiverPerm, Bundle options,

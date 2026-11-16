@@ -1,0 +1,103 @@
+From a75e1f4b8e8816e1f4314000af7349752a66df8b Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 21 Jan 2022 22:05:44 +0200
+Subject: [PATCH 1/6] add dynamic link to sandboxed Google Play settings
+
+(cherry picked from commit 3ec0ec5d1f568d95dd2cd14a73d9ac02910cc9bc)
+Change-Id: I28e512a6e215a39912de411e15a3abec75b482fc
+---
+ res/values/strings_ext.xml                    |  6 +++
+ res/xml/apps.xml                              | 13 +++++
+ .../applications/GmsCompatAppController.java  | 48 +++++++++++++++++++
+ 3 files changed, 67 insertions(+)
+ create mode 100644 res/values/strings_ext.xml
+ create mode 100644 src/com/android/settings/applications/GmsCompatAppController.java
+
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+new file mode 100644
+index 0000000000..6b7f69f7cc
+--- /dev/null
++++ b/res/values/strings_ext.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Strings added by GrapheneOS-derived features (not translated by LineageOS). -->
++<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
++    <string name="sandboxed_google_play">Sandboxed Google Play</string>
++    <string name="sandboxed_google_play_work_profile">Sandboxed Google Play (work profile)</string>
++</resources>
+diff --git a/res/xml/apps.xml b/res/xml/apps.xml
+index b6874973b2..8233a1f8a7 100644
+--- a/res/xml/apps.xml
++++ b/res/xml/apps.xml
+@@ -134,4 +134,17 @@
+         </Preference>
+     </PreferenceCategory>
+ 
++    <Preference
++        android:key="sandboxed_google_play"
++        android:title="@string/sandboxed_google_play"
++        android:order="-980"
++        settings:controller="com.android.settings.applications.GmsCompatAppController"/>
++
++    <Preference
++        android:key="sandboxed_google_play_work_profile"
++        android:title="@string/sandboxed_google_play_work_profile"
++        android:order="-979"
++        settings:forWork="true"
++        settings:controller="com.android.settings.applications.GmsCompatAppController"/>
++
+ </PreferenceScreen>
+diff --git a/src/com/android/settings/applications/GmsCompatAppController.java b/src/com/android/settings/applications/GmsCompatAppController.java
+new file mode 100644
+index 0000000000..32fe7d05e6
+--- /dev/null
++++ b/src/com/android/settings/applications/GmsCompatAppController.java
+@@ -0,0 +1,48 @@
++package com.android.settings.applications;
++
++import android.app.compat.gms.GmsCompat;
++import android.content.Context;
++import android.content.Intent;
++import android.os.UserHandle;
++import android.text.TextUtils;
++
++import androidx.preference.Preference;
++
++import com.android.internal.gmscompat.GmsCompatApp;
++import com.android.internal.gmscompat.GmsInfo;
++import com.android.settings.core.BasePreferenceController;
++
++public class GmsCompatAppController extends BasePreferenceController {
++
++    public GmsCompatAppController(Context context, String key) {
++        super(context, key);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        UserHandle workProfile = getWorkProfileUser();
++        int userId = workProfile != null ?
++                workProfile.getIdentifier() :
++                UserHandle.myUserId();
++
++        return GmsCompat.isEnabledFor(GmsInfo.PACKAGE_GMS_CORE, userId) ?
++                AVAILABLE : DISABLED_FOR_USER;
++    }
++
++    @Override
++    public boolean handlePreferenceTreeClick(Preference preference) {
++        if (!TextUtils.equals(preference.getKey(), getPreferenceKey())) {
++            return false;
++        }
++        Intent intent = new Intent(GmsCompatApp.PKG_NAME + ".SETTINGS_LINK");
++        intent.setPackage(GmsCompatApp.PKG_NAME);
++
++        UserHandle workProfile = getWorkProfileUser();
++        if (workProfile != null) {
++            mContext.startActivityAsUser(intent, workProfile);
++        } else {
++            mContext.startActivity(intent);
++        }
++        return true;
++    }
++}

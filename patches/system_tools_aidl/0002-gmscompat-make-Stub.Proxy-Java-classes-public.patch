@@ -1,0 +1,39 @@
+From d724a45b2108d6797798621dd82dc3bf711a9d02 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 20 Oct 2025 22:49:16 +0300
+Subject: [PATCH 2/2] gmscompat: make Stub.Proxy Java classes public
+
+Change-Id: Iafac84905bc7e2f5cd69ec85eca29ffb7db0fa8e
+(cherry picked from commit 6e43dfbfa750163bedd259a79a9de4558c1b3d56)
+---
+ generate_java_binder.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/generate_java_binder.cpp b/generate_java_binder.cpp
+index 72352d94..ae022530 100644
+--- a/generate_java_binder.cpp
++++ b/generate_java_binder.cpp
+@@ -369,19 +369,21 @@ ProxyClass::ProxyClass(const AidlInterface* interfaceType, const Options& option
+   if (interfaceType->IsDeprecated()) {
+     this->annotations.push_back("@Deprecated");
+   }
+-  this->modifiers = PRIVATE | STATIC | FINAL;
++  this->modifiers = PUBLIC | STATIC;
++  this->comment = "/** @hide */";
+   this->what = Class::CLASS;
+   this->type = interfaceType->GetCanonicalName() + ".Stub.Proxy";
+   this->interfaces.push_back(interfaceType->GetCanonicalName());
+ 
+   // IBinder mRemote
+   mRemote = std::make_shared<Variable>("android.os.IBinder", "mRemote");
+-  this->elements.push_back(std::make_shared<Field>(PRIVATE, mRemote));
++  this->elements.push_back(std::make_shared<Field>(PROTECTED, mRemote));
+ 
+   // Proxy()
+   auto remote = std::make_shared<Variable>("android.os.IBinder", "remote");
+   auto ctor = std::make_shared<Method>();
+   ctor->name = "Proxy";
++  ctor->modifiers = PROTECTED;
+   ctor->statements = std::make_shared<StatementBlock>();
+   ctor->parameters.push_back(remote);
+   ctor->statements->Add(std::make_shared<Assignment>(mRemote, remote));

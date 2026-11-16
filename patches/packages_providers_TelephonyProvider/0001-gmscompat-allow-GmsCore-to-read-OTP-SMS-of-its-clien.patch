@@ -1,0 +1,91 @@
+From e5ed6adbc15a4bde7087c799f513c1d9e64cc64c Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 27 Jan 2026 11:49:52 +0000
+Subject: [PATCH] gmscompat: allow GmsCore to read OTP SMS of its clients
+
+Since 16 QPR2, unprivileged apps that have the SMS permission aren't allowed to read OTP SMS that
+aren't addressed to them.
+
+This commit allows GmsCore to read OTP SMS that are addressed to its clients. GmsCore is trusted by
+its clients and they run the GmsCore client library inside their own processes.
+
+(cherry picked from commit a04451af82a48b05f48940c9a8506be92f2b7e46)
+---
+ .../providers/telephony/ProviderUtil.java     | 11 ++++-
+ .../providers/telephony/SmsProviderExt.java   | 42 +++++++++++++++++++
+ 2 files changed, 52 insertions(+), 1 deletion(-)
+ create mode 100644 src/com/android/providers/telephony/SmsProviderExt.java
+
+diff --git a/src/com/android/providers/telephony/ProviderUtil.java b/src/com/android/providers/telephony/ProviderUtil.java
+index f03abe44..ca0e7b4c 100644
+--- a/src/com/android/providers/telephony/ProviderUtil.java
++++ b/src/com/android/providers/telephony/ProviderUtil.java
+@@ -418,10 +418,19 @@ public class ProviderUtil {
+                 getOtpPendingSqlFilter(), Telephony.Sms.DATE, pendingOtpCutoff));
+         final String hash = PackageBasedTokenUtil.generatePackageBasedToken(
+                 context.getPackageManager(), callingPackage, userHandle);
++        var packageHashes = new ArrayList<String>();
+         if (hash != null) {
++            packageHashes.add(hash);
++        }
++
++        SmsProviderExt.maybeGetGmsCoreDependantPackageHashes(context,
++                        callingPackage, userHandle, packageHashes);
++
++        for (String packageHash : packageHashes) {
+             where.append(String.format(Locale.US, " OR (%s LIKE '%%%s%%')",
+-                    Telephony.Sms.BODY, hash));
++                    Telephony.Sms.BODY, packageHash));
+         }
++
+         // Note: For backwards compatibility, we allow packages with
+         // targetSdk < CINNAMON_BUN to read generic OTP messages.
+         if (android.view.flags.Flags.redactOtpAppCompatApi()
+diff --git a/src/com/android/providers/telephony/SmsProviderExt.java b/src/com/android/providers/telephony/SmsProviderExt.java
+new file mode 100644
+index 00000000..c99475a9
+--- /dev/null
++++ b/src/com/android/providers/telephony/SmsProviderExt.java
+@@ -0,0 +1,42 @@
++package com.android.providers.telephony;
++
++import android.content.Context;
++import android.content.pm.ApplicationInfo;
++import android.content.pm.PackageManager;
++import android.ext.AppInfoExtFlag;
++import android.ext.PackageId;
++import android.os.UserHandle;
++
++import com.android.internal.telephony.PackageBasedTokenUtil;
++
++import java.util.ArrayList;
++
++class SmsProviderExt {
++
++    static void maybeGetGmsCoreDependantPackageHashes(Context ctx, String callingPackage,
++                                                      UserHandle callerUser, ArrayList<String> dst) {
++        if (!PackageId.GMS_CORE_NAME.equals(callingPackage)) {
++            return;
++        }
++
++        ApplicationInfo callerAppInfo;
++        PackageManager pm = ctx.getPackageManager();
++        int callerUserId = callerUser.getIdentifier();
++        try {
++            callerAppInfo = pm.getApplicationInfoAsUser(PackageId.GMS_CORE_NAME, 0, callerUserId);
++        } catch (PackageManager.NameNotFoundException e) {
++            return;
++        }
++        if (callerAppInfo.ext().getPackageId() != PackageId.GMS_CORE) {
++            return;
++        }
++
++        for (ApplicationInfo app : pm.getInstalledApplicationsAsUser(0, callerUserId)) {
++            if (app.ext().hasFlag(AppInfoExtFlag.HAS_GMSCORE_CLIENT_LIBRARY)) {
++                // GmsCompat: allow GmsCore to read SMS OTP that are addressed to
++                // its clients if GmsCore has the SMS permission
++                dst.add(PackageBasedTokenUtil.generatePackageBasedToken(pm, app.packageName));
++            }
++        }
++    }
++}

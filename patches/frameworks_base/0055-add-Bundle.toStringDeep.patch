@@ -1,0 +1,31 @@
+From 499d039b7b39f4ea766b3330db648d2c82e7e930 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 7 Oct 2024 14:54:03 +0300
+Subject: [PATCH 55/67] add Bundle.toStringDeep()
+
+(cherry picked from commit e8593514a6e35a3008ef6eb6918407876b411597)
+---
+ core/java/android/os/Bundle.java | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/core/java/android/os/Bundle.java b/core/java/android/os/Bundle.java
+index a2bb4a02a9..db27dd5f41 100644
+--- a/core/java/android/os/Bundle.java
++++ b/core/java/android/os/Bundle.java
+@@ -1586,6 +1586,16 @@ public final class Bundle extends BaseBundle implements Cloneable, Parcelable {
+         return "Bundle[" + mMap.toString() + "]";
+     }
+ 
++    /**
++     * Same as {@link #toString()}, but unparcels the internal map if it isn't unparcelled already,
++     * which ensures that the internal map contents are included in the result.
++     * @hide
++     */
++    public String toStringDeep() {
++        unparcel((mFlags & FLAG_DEFUSABLE) != 0);
++        return toString();
++    }
++
+     /**
+      * @hide
+      */

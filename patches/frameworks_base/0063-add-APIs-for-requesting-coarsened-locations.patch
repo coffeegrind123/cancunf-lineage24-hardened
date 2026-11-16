@@ -1,0 +1,516 @@
+From 74f62e0665d9df5d9b501dc1af90c02e55a0e5aa Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 26 Oct 2026 02:21:55 +0000
+Subject: [PATCH 63/67] add APIs for requesting coarsened locations
+
+(cherry picked from commit 138e1794535822204f78cf459ed0a4b79f6ab6b0)
+---
+ .../android/location/LastLocationRequest.java |  44 ++++++-
+ .../android/location/LocationRequest.java     |  48 ++++++-
+ .../provider/LocationProviderManager.java     |  31 ++++-
+ .../provider/LocationProviderManagerTest.java | 120 ++++++++++++++++++
+ 4 files changed, 239 insertions(+), 4 deletions(-)
+
+diff --git a/location/java/android/location/LastLocationRequest.java b/location/java/android/location/LastLocationRequest.java
+index d90c2e6993..bcf7bed9b1 100644
+--- a/location/java/android/location/LastLocationRequest.java
++++ b/location/java/android/location/LastLocationRequest.java
+@@ -23,6 +23,7 @@ import android.annotation.NonNull;
+ import android.annotation.RequiresFeature;
+ import android.annotation.RequiresPermission;
+ import android.annotation.SystemApi;
++import android.compat.annotation.UnsupportedAppUsage;
+ import android.content.pm.PackageManager;
+ import android.os.Parcel;
+ import android.os.Parcelable;
+@@ -37,14 +38,17 @@ import java.util.Objects;
+ @SystemApi
+ public final class LastLocationRequest implements Parcelable {
+ 
++    private final boolean mCoarse;
+     private final boolean mHiddenFromAppOps;
+     private final boolean mAdasGnssBypass;
+     private final boolean mLocationSettingsIgnored;
+ 
+     private LastLocationRequest(
++            boolean coarse,
+             boolean hiddenFromAppOps,
+             boolean adasGnssBypass,
+             boolean locationSettingsIgnored) {
++        mCoarse = coarse;
+         mHiddenFromAppOps = hiddenFromAppOps;
+         mAdasGnssBypass = adasGnssBypass;
+         mLocationSettingsIgnored = locationSettingsIgnored;
+@@ -79,6 +83,16 @@ public final class LastLocationRequest implements Parcelable {
+         return mAdasGnssBypass;
+     }
+ 
++    /**
++     * Returns true if this request is limited to coarse locations even if the requesting app holds
++     * the {@link Manifest.permission#ACCESS_FINE_LOCATION} permission. See
++     * {@link Builder#setCoarse(boolean)}.
++     *
++     * @hide
++     */
++    public boolean isCoarse() {
++        return mCoarse;
++    }
+ 
+     /**
+      * Returns true if location settings, throttling, background location limits, and any other
+@@ -107,6 +121,7 @@ public final class LastLocationRequest implements Parcelable {
+                 @Override
+                 public LastLocationRequest createFromParcel(Parcel in) {
+                     return new LastLocationRequest(
++                            /* coarse= */ in.readBoolean(),
+                             /* hiddenFromAppOps= */ in.readBoolean(),
+                             /* adasGnssBypass= */ in.readBoolean(),
+                             /* locationSettingsIgnored= */ in.readBoolean());
+@@ -123,6 +138,7 @@ public final class LastLocationRequest implements Parcelable {
+ 
+     @Override
+     public void writeToParcel(@NonNull Parcel parcel, int flags) {
++        parcel.writeBoolean(mCoarse);
+         parcel.writeBoolean(mHiddenFromAppOps);
+         parcel.writeBoolean(mAdasGnssBypass);
+         parcel.writeBoolean(mLocationSettingsIgnored);
+@@ -138,13 +154,14 @@ public final class LastLocationRequest implements Parcelable {
+         }
+         LastLocationRequest that = (LastLocationRequest) o;
+         return mHiddenFromAppOps == that.mHiddenFromAppOps
++                && mCoarse == that.mCoarse
+                 && mAdasGnssBypass == that.mAdasGnssBypass
+                 && mLocationSettingsIgnored == that.mLocationSettingsIgnored;
+     }
+ 
+     @Override
+     public int hashCode() {
+-        return Objects.hash(mHiddenFromAppOps, mAdasGnssBypass, mLocationSettingsIgnored);
++        return Objects.hash(mHiddenFromAppOps, mAdasGnssBypass, mLocationSettingsIgnored, mCoarse);
+     }
+ 
+     @NonNull
+@@ -152,6 +169,9 @@ public final class LastLocationRequest implements Parcelable {
+     public String toString() {
+         StringBuilder s = new StringBuilder();
+         s.append("LastLocationRequest[");
++        if (mCoarse) {
++            s.append("coarse, ");
++        }
+         if (mHiddenFromAppOps) {
+             s.append("hiddenFromAppOps, ");
+         }
+@@ -173,6 +193,7 @@ public final class LastLocationRequest implements Parcelable {
+      */
+     public static final class Builder {
+ 
++        private boolean mCoarse;
+         private boolean mHiddenFromAppOps;
+         private boolean mAdasGnssBypass;
+         private boolean mLocationSettingsIgnored;
+@@ -181,6 +202,7 @@ public final class LastLocationRequest implements Parcelable {
+          * Creates a new Builder.
+          */
+         public Builder() {
++            mCoarse = false;
+             mHiddenFromAppOps = false;
+             mAdasGnssBypass = false;
+             mLocationSettingsIgnored = false;
+@@ -190,6 +212,7 @@ public final class LastLocationRequest implements Parcelable {
+          * Creates a new Builder with all parameters copied from the given last location request.
+          */
+         public Builder(@NonNull LastLocationRequest lastLocationRequest) {
++            mCoarse = lastLocationRequest.mCoarse;
+             mHiddenFromAppOps = lastLocationRequest.mHiddenFromAppOps;
+             mAdasGnssBypass = lastLocationRequest.mAdasGnssBypass;
+             mLocationSettingsIgnored = lastLocationRequest.mLocationSettingsIgnored;
+@@ -212,6 +235,24 @@ public final class LastLocationRequest implements Parcelable {
+             return this;
+         }
+ 
++        /**
++         * If set to true, the returned last location is coarsened in the same way as for apps
++         * that hold only the {@link Manifest.permission#ACCESS_COARSE_LOCATION} permission, even
++         * if the requesting app holds the {@link Manifest.permission#ACCESS_FINE_LOCATION}
++         * permission. Such request is attributed to the coarse location app op. Defaults to false.
++         *
++         * <p>The requesting app needs to hold the ACCESS_COARSE_LOCATION permission, otherwise no
++         * location is returned. Apps that target Android 11 or lower may hold the
++         * ACCESS_FINE_LOCATION permission without holding the ACCESS_COARSE_LOCATION permission.
++         *
++         * @hide
++         */
++        @UnsupportedAppUsage
++        public @NonNull Builder setCoarse(boolean coarse) {
++            mCoarse = coarse;
++            return this;
++        }
++
+         /**
+          * If set to true, indicates that the client is an ADAS (Advanced Driving Assistance
+          * Systems) client, which requires access to GNSS even if location settings would normally
+@@ -257,6 +298,7 @@ public final class LastLocationRequest implements Parcelable {
+          */
+         public @NonNull LastLocationRequest build() {
+             return new LastLocationRequest(
++                    mCoarse,
+                     mHiddenFromAppOps,
+                     mAdasGnssBypass,
+                     mLocationSettingsIgnored);
+diff --git a/location/java/android/location/LocationRequest.java b/location/java/android/location/LocationRequest.java
+index 1ded1d4915..7ed81524ee 100644
+--- a/location/java/android/location/LocationRequest.java
++++ b/location/java/android/location/LocationRequest.java
+@@ -32,6 +32,7 @@ import android.annotation.RequiresPermission;
+ import android.annotation.SystemApi;
+ import android.compat.annotation.ChangeId;
+ import android.compat.annotation.EnabledAfter;
++import android.compat.annotation.UnsupportedAppUsage;
+ import android.content.pm.PackageManager;
+ import android.os.Build;
+ import android.os.Parcel;
+@@ -184,6 +185,7 @@ public final class LocationRequest implements Parcelable {
+     private static final double LEGACY_IMPLICIT_MIN_UPDATE_INTERVAL_FACTOR = 1D / 6D;
+     private static final double IMPLICIT_MIN_UPDATE_INTERVAL_FACTOR = 1D / 2D;
+ 
++    private final boolean mCoarse;
+     private @Nullable String mProvider;
+     private @Quality int mQuality;
+     private long mIntervalMillis;
+@@ -278,6 +280,7 @@ public final class LocationRequest implements Parcelable {
+     }
+ 
+     private LocationRequest(
++            boolean coarse,
+             @Nullable String provider,
+             long intervalMillis,
+             @Quality int quality,
+@@ -292,6 +295,7 @@ public final class LocationRequest implements Parcelable {
+             boolean bypass,
+             boolean lowPower,
+             WorkSource workSource) {
++        mCoarse = coarse;
+         mProvider = provider;
+         mIntervalMillis = intervalMillis;
+         mQuality = quality;
+@@ -758,12 +762,24 @@ public final class LocationRequest implements Parcelable {
+         return mWorkSource;
+     }
+ 
++    /**
++     * Returns true if this request is limited to coarse locations even if the requesting app holds
++     * the {@link Manifest.permission#ACCESS_FINE_LOCATION} permission. See
++     * {@link Builder#setCoarse(boolean)}.
++     *
++     * @hide
++     */
++    public boolean isCoarse() {
++        return mCoarse;
++    }
++
+ 
+     public static final @NonNull Parcelable.Creator<LocationRequest> CREATOR =
+             new Parcelable.Creator<LocationRequest>() {
+                 @Override
+                 public LocationRequest createFromParcel(Parcel in) {
+                     return new LocationRequest(
++                            /* coarse= */ in.readBoolean(),
+                             /* provider= */ in.readString(),
+                             /* intervalMillis= */ in.readLong(),
+                             /* quality= */ in.readInt(),
+@@ -793,6 +809,7 @@ public final class LocationRequest implements Parcelable {
+ 
+     @Override
+     public void writeToParcel(@NonNull Parcel parcel, int flags) {
++        parcel.writeBoolean(mCoarse);
+         parcel.writeString(mProvider);
+         parcel.writeLong(mIntervalMillis);
+         parcel.writeInt(mQuality);
+@@ -831,6 +848,7 @@ public final class LocationRequest implements Parcelable {
+                 && mAdasGnssBypass == that.mAdasGnssBypass
+                 && mBypass == that.mBypass
+                 && mLowPower == that.mLowPower
++                && mCoarse == that.mCoarse
+                 && Objects.equals(mProvider, that.mProvider)
+                 && Objects.equals(mWorkSource, that.mWorkSource);
+     }
+@@ -900,6 +918,9 @@ public final class LocationRequest implements Parcelable {
+         if (mBypass) {
+             s.append(", bypass");
+         }
++        if (mCoarse) {
++            s.append(", coarse");
++        }
+         if (mWorkSource != null && !mWorkSource.isEmpty()) {
+             s.append(", ").append(mWorkSource);
+         }
+@@ -911,7 +932,7 @@ public final class LocationRequest implements Parcelable {
+      * A builder class for {@link LocationRequest}.
+      */
+     public static final class Builder {
+-
++        private boolean mCoarse;
+         private long mIntervalMillis;
+         private @Quality int mQuality;
+         private long mDurationMillis;
+@@ -930,6 +951,7 @@ public final class LocationRequest implements Parcelable {
+          * more information on the interval.
+          */
+         public Builder(long intervalMillis) {
++            mCoarse = false;
+             // gives us a range check
+             setIntervalMillis(intervalMillis);
+ 
+@@ -950,6 +972,7 @@ public final class LocationRequest implements Parcelable {
+          * Creates a new Builder with all parameters copied from the given location request.
+          */
+         public Builder(@NonNull LocationRequest locationRequest) {
++            mCoarse = locationRequest.mCoarse;
+             mIntervalMillis = locationRequest.mIntervalMillis;
+             mQuality = locationRequest.mQuality;
+             mDurationMillis = locationRequest.mDurationMillis;
+@@ -990,6 +1013,28 @@ public final class LocationRequest implements Parcelable {
+             return this;
+         }
+ 
++        /**
++         * If set to true, locations delivered for this request are coarsened in the same way as
++         * for apps that hold only the {@link Manifest.permission#ACCESS_COARSE_LOCATION}
++         * permission, even if the requesting app holds the
++         * {@link Manifest.permission#ACCESS_FINE_LOCATION} permission. Such request is attributed
++         * to the coarse location app op and is subject to the same minimum update interval as
++         * requests from apps that hold only the ACCESS_COARSE_LOCATION permission, but its quality
++         * is capped at {@link #QUALITY_BALANCED_POWER_ACCURACY} instead of being lowered to
++         * {@link #QUALITY_LOW_POWER}. Defaults to false.
++         *
++         * <p>The requesting app needs to hold the ACCESS_COARSE_LOCATION permission, otherwise no
++         * locations are delivered. Apps that target Android 11 or lower may hold the
++         * ACCESS_FINE_LOCATION permission without holding the ACCESS_COARSE_LOCATION permission.
++         *
++         * @hide
++         */
++        @UnsupportedAppUsage
++        public @NonNull Builder setCoarse(boolean coarse) {
++            mCoarse = coarse;
++            return this;
++        }
++
+         /**
+          * Sets the request quality. The quality is a hint to providers on how they should weigh
+          * power vs accuracy tradeoffs. High accuracy locations may cost more power to produce, and
+@@ -1216,6 +1261,7 @@ public final class LocationRequest implements Parcelable {
+                     "passive location requests must have an explicit minimum update interval");
+ 
+             return new LocationRequest(
++                    mCoarse,
+                     null,
+                     mIntervalMillis,
+                     mQuality,
+diff --git a/services/core/java/com/android/server/location/provider/LocationProviderManager.java b/services/core/java/com/android/server/location/provider/LocationProviderManager.java
+index f38c03d771..a27c60d240 100644
+--- a/services/core/java/com/android/server/location/provider/LocationProviderManager.java
++++ b/services/core/java/com/android/server/location/provider/LocationProviderManager.java
+@@ -409,7 +409,9 @@ public class LocationProviderManager extends
+ 
+             mBaseRequest = Objects.requireNonNull(request);
+             mIdentity = Objects.requireNonNull(identity);
+-            mPermissionLevel = permissionLevel;
++            // see LocationRequest.Builder#setCoarse()
++            mPermissionLevel = request.isCoarse()
++                    ? min(permissionLevel, PERMISSION_COARSE) : permissionLevel;
+             mProviderLocationRequest = request;
+         }
+ 
+@@ -709,7 +711,20 @@ public class LocationProviderManager extends
+             LocationRequest.Builder builder = new LocationRequest.Builder(mBaseRequest);
+ 
+             if (mPermissionLevel < PERMISSION_FINE) {
+-                builder.setQuality(LocationRequest.QUALITY_LOW_POWER);
++                if (mBaseRequest.isCoarse()) {
++                    // See LocationRequest.Builder#setCoarse(). Fused location provider doesn't use
++                    // GNSS for low power requests when network location provider is present, and
++                    // network location provider is always present on GrapheneOS, but is disabled
++                    // by default. Lowering the quality of coarse requests to low power would leave
++                    // them without locations in that case, cap it at balanced instead. Note that
++                    // the requested quality value isn't validated.
++                    builder.setQuality(
++                            mBaseRequest.getQuality() == LocationRequest.QUALITY_LOW_POWER
++                                    ? LocationRequest.QUALITY_LOW_POWER
++                                    : LocationRequest.QUALITY_BALANCED_POWER_ACCURACY);
++                } else {
++                    builder.setQuality(LocationRequest.QUALITY_LOW_POWER);
++                }
+                 if (mBaseRequest.getIntervalMillis() < MIN_COARSE_INTERVAL_MS) {
+                     builder.setIntervalMillis(MIN_COARSE_INTERVAL_MS);
+                 }
+@@ -1826,6 +1841,18 @@ public class LocationProviderManager extends
+ 
+     @Nullable public Location getLastLocation(LastLocationRequest request,
+             CallerIdentity identity, @PermissionLevel int permissionLevel) {
++        // see LastLocationRequest.Builder#setCoarse()
++        if (request.isCoarse() && permissionLevel == PERMISSION_FINE) {
++            // Apps that target Android 11 or lower may hold the ACCESS_FINE_LOCATION permission
++            // without holding the ACCESS_COARSE_LOCATION permission. The coarse location app op
++            // isn't managed by the permission system for such apps, which means that it can't be
++            // relied upon for enforcing restrictions such as foreground-only location access.
++            if (!mLocationPermissionsHelper.hasLocationPermissions(PERMISSION_COARSE, identity)) {
++                return null;
++            }
++            permissionLevel = PERMISSION_COARSE;
++        }
++
+         request = calculateLastLocationRequest(request, identity);
+ 
+         if (!isActive(request.isBypass(), identity)) {
+diff --git a/services/tests/mockingservicestests/src/com/android/server/location/provider/LocationProviderManagerTest.java b/services/tests/mockingservicestests/src/com/android/server/location/provider/LocationProviderManagerTest.java
+index 2763580238..9facfc6433 100644
+--- a/services/tests/mockingservicestests/src/com/android/server/location/provider/LocationProviderManagerTest.java
++++ b/services/tests/mockingservicestests/src/com/android/server/location/provider/LocationProviderManagerTest.java
+@@ -19,6 +19,7 @@ package com.android.server.location.provider;
+ import static android.Manifest.permission.ACCESS_COARSE_LOCATION;
+ import static android.Manifest.permission.ACCESS_FINE_LOCATION;
+ import static android.Manifest.permission.LOCATION_BYPASS;
++import static android.app.AppOpsManager.OP_COARSE_LOCATION;
+ import static android.app.AppOpsManager.OP_FINE_LOCATION;
+ import static android.app.AppOpsManager.OP_MONITOR_HIGH_POWER_LOCATION;
+ import static android.app.AppOpsManager.OP_MONITOR_LOCATION;
+@@ -360,6 +361,33 @@ public class LocationProviderManagerTest {
+         assertThat(coarse).isNearby(loc, 5000);
+     }
+ 
++    @Test
++    public void testGetLastLocation_CoarseRequest() {
++        Location loc = createLocation(NAME, mRandom);
++        mProvider.setProviderLocation(loc);
++        Location coarse = mManager.getLastLocation(
++                new LastLocationRequest.Builder().setCoarse(true).build(), IDENTITY,
++                PERMISSION_FINE);
++        assertThat(coarse).isNotEqualTo(loc);
++        assertThat(coarse).isNearby(loc, 5000);
++
++        assertThat(mInjector.getAppOpsHelper().getAppOpNoteCount(OP_COARSE_LOCATION,
++                IDENTITY.getPackageName())).isEqualTo(1);
++        assertThat(mInjector.getAppOpsHelper().getAppOpNoteCount(OP_FINE_LOCATION,
++                IDENTITY.getPackageName())).isEqualTo(0);
++    }
++
++    @Test
++    public void testGetLastLocation_CoarseRequest_NoCoarsePermission() {
++        mInjector.getLocationPermissionsHelper()
++                .revokePermission(IDENTITY.getPackageName(), ACCESS_COARSE_LOCATION);
++
++        mProvider.setProviderLocation(createLocation(NAME, mRandom));
++        assertThat(mManager.getLastLocation(
++                new LastLocationRequest.Builder().setCoarse(true).build(), IDENTITY,
++                PERMISSION_FINE)).isNull();
++    }
++
+     @Test
+     public void testGetLastLocation_InvisibleUser() {
+         Location loc = createLocation(NAME, mRandom);
+@@ -774,6 +802,62 @@ public class LocationProviderManagerTest {
+                 .onLocationChanged(any(List.class), nullable(IRemoteCallback.class));
+     }
+ 
++    @Test
++    public void testRegisterListener_CoarseRequest() throws Exception {
++        ILocationListener listener = createMockLocationListener();
++        mManager.registerLocationRequest(
++                new LocationRequest.Builder(0)
++                        .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
++                        .setCoarse(true)
++                        .setWorkSource(WORK_SOURCE)
++                        .build(),
++                IDENTITY,
++                PERMISSION_FINE,
++                listener);
++
++        // coarse requests are subject to the coarse minimum interval, and their quality is capped
++        // at balanced instead of being lowered to low power
++        assertThat(mProvider.getRequest().getIntervalMillis()).isEqualTo(10 * 60 * 1000);
++        assertThat(mProvider.getRequest().getQuality()).isEqualTo(
++                LocationRequest.QUALITY_BALANCED_POWER_ACCURACY);
++
++        Location loc = createLocation(NAME, mRandom);
++        mProvider.setProviderLocation(loc);
++        mProvider.setProviderLocation(createLocation(NAME, mRandom));
++
++        ArgumentCaptor<List<Location>> captor = ArgumentCaptor.forClass(List.class);
++        verify(listener, times(1)).onLocationChanged(captor.capture(),
++                nullable(IRemoteCallback.class));
++        Location coarse = captor.getValue().get(0);
++        assertThat(coarse).isNotEqualTo(loc);
++        assertThat(coarse).isNearby(loc, 5000);
++
++        assertThat(mInjector.getAppOpsHelper().getAppOpNoteCount(OP_COARSE_LOCATION,
++                IDENTITY.getPackageName())).isEqualTo(1);
++        assertThat(mInjector.getAppOpsHelper().getAppOpNoteCount(OP_FINE_LOCATION,
++                IDENTITY.getPackageName())).isEqualTo(0);
++    }
++
++    @Test
++    public void testRegisterListener_CoarseRequest_NoCoarsePermission() throws Exception {
++        mInjector.getLocationPermissionsHelper()
++                .revokePermission(IDENTITY.getPackageName(), ACCESS_COARSE_LOCATION);
++
++        ILocationListener listener = createMockLocationListener();
++        mManager.registerLocationRequest(
++                new LocationRequest.Builder(0)
++                        .setCoarse(true)
++                        .setWorkSource(WORK_SOURCE)
++                        .build(),
++                IDENTITY,
++                PERMISSION_FINE,
++                listener);
++
++        mProvider.setProviderLocation(createLocation(NAME, mRandom));
++        verify(listener, never()).onLocationChanged(any(List.class),
++                nullable(IRemoteCallback.class));
++    }
++
+     @Test
+     public void testProviderRequestListener() throws Exception {
+         IProviderRequestListener requestListener = mock(IProviderRequestListener.class);
+@@ -803,6 +887,42 @@ public class LocationProviderManagerTest {
+         verify(listener, times(1)).onLocation(loc);
+     }
+ 
++    @Test
++    public void testGetCurrentLocation_CoarseRequest() throws Exception {
++        ILocationCallback listener = createMockGetCurrentLocationListener();
++        LocationRequest request = new LocationRequest.Builder(0)
++                .setCoarse(true)
++                .setWorkSource(WORK_SOURCE)
++                .build();
++        mManager.getCurrentLocation(request, IDENTITY, PERMISSION_FINE, listener);
++
++        Location loc = createLocation(NAME, mRandom);
++        mProvider.setProviderLocation(loc);
++
++        ArgumentCaptor<Location> captor = ArgumentCaptor.forClass(Location.class);
++        verify(listener, times(1)).onLocation(captor.capture());
++        assertThat(captor.getValue()).isNotEqualTo(loc);
++        assertThat(captor.getValue()).isNearby(loc, 5000);
++    }
++
++    @Test
++    public void testGetCurrentLocation_CoarseRequest_LastLocation() throws Exception {
++        Location loc = createLocation(NAME, mRandom);
++        mProvider.setProviderLocation(loc);
++
++        ILocationCallback listener = createMockGetCurrentLocationListener();
++        LocationRequest request = new LocationRequest.Builder(0)
++                .setCoarse(true)
++                .setWorkSource(WORK_SOURCE)
++                .build();
++        mManager.getCurrentLocation(request, IDENTITY, PERMISSION_FINE, listener);
++
++        ArgumentCaptor<Location> captor = ArgumentCaptor.forClass(Location.class);
++        verify(listener, times(1)).onLocation(captor.capture());
++        assertThat(captor.getValue()).isNotEqualTo(loc);
++        assertThat(captor.getValue()).isNearby(loc, 5000);
++    }
++
+     @Test
+     public void testGetCurrentLocation_Cancel() throws Exception {
+         ILocationCallback listener = createMockGetCurrentLocationListener();

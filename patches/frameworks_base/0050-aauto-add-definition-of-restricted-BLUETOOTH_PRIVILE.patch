@@ -1,0 +1,39 @@
+From 6913e8874bed694c22e1e8e2c6e364fa1d3b2486 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 18 Dec 2023 16:57:49 +0200
+Subject: [PATCH 50/67] aauto: add definition of restricted
+ BLUETOOTH_PRIVILEGED permission
+
+(cherry picked from commit e3475a6f9a451dcff55cbd56e9c032478e2e1393)
+---
+ core/api/system-current.txt  | 1 +
+ core/res/AndroidManifest.xml | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/core/api/system-current.txt b/core/api/system-current.txt
+index 9666660869..529de578de 100644
+--- a/core/api/system-current.txt
++++ b/core/api/system-current.txt
+@@ -122,6 +122,7 @@ package android {
+     field public static final String BIND_WALLPAPER_EFFECTS_GENERATION_SERVICE = "android.permission.BIND_WALLPAPER_EFFECTS_GENERATION_SERVICE";
+     field public static final String BIND_WEARABLE_SENSING_SERVICE = "android.permission.BIND_WEARABLE_SENSING_SERVICE";
+     field public static final String BLUETOOTH_MAP = "android.permission.BLUETOOTH_MAP";
++    field public static final String BLUETOOTH_PRIVILEGED_ANDROID_AUTO = "android.permission.BLUETOOTH_PRIVILEGED_ANDROID_AUTO";
+     field public static final String BRICK = "android.permission.BRICK";
+     field public static final String BRIGHTNESS_SLIDER_USAGE = "android.permission.BRIGHTNESS_SLIDER_USAGE";
+     field public static final String BROADCAST_CLOSE_SYSTEM_DIALOGS = "android.permission.BROADCAST_CLOSE_SYSTEM_DIALOGS";
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index 8abc9da34f..47ce01da09 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -2746,6 +2746,10 @@
+     <permission android:name="android.permission.BLUETOOTH_PRIVILEGED"
+         android:protectionLevel="signature|privileged" />
+ 
++    <!--- @SystemApi @hide -->
++    <permission android:name="android.permission.BLUETOOTH_PRIVILEGED_ANDROID_AUTO"
++        android:protectionLevel="internal" />
++
+     <!-- @SystemApi Control access to email providers exclusively for Bluetooth
+          @hide
+     -->

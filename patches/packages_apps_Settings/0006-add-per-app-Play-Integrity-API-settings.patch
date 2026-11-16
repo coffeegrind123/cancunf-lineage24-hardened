@@ -1,0 +1,268 @@
+From 0a8cf2b38b6098e496015e0c42018bfe3a1b1c72 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Sat, 25 Jan 2025 13:25:51 +0200
+Subject: [PATCH 6/6] add per-app Play Integrity API settings
+
+Adapted: placed in the App info Advanced category (there is no Exploit
+protection category here), registered in its own SPA page list, intro
+text reworded to not refer to GrapheneOS.
+
+(cherry picked from commit 995d9becd31a6ca054eac286cb8f8922fe8d4207)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+Change-Id: I257a4e88b84fbca496a3f1deb2cb442fc537b2f1
+---
+ AndroidManifest.xml                           |  16 ++
+ res/values/strings_ext.xml                    |  12 ++
+ src/com/android/settings/Settings.java        |   2 +
+ .../applications/AppManagePlayIntegrityApi.kt | 138 ++++++++++++++++++
+ .../core/gateway/SettingsGateway.java         |   1 +
+ .../settings/spa/SettingsSpaEnvironment.kt    |   5 +
+ .../spa/app/appinfo/AppInfoSettings.kt        |   1 +
+ 7 files changed, 175 insertions(+)
+ create mode 100644 src/com/android/settings/applications/AppManagePlayIntegrityApi.kt
+
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index e45bc1b23b..9dd23ddffd 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -6312,5 +6312,21 @@
+ 
+         <!-- This is the longest AndroidManifest.xml ever. -->
+ 
++        <activity
++            android:name=".Settings$AppManagePlayIntegrityApiActivity"
++            android:exported="true">
++
++            <intent-filter>
++                <action android:name="android.settings.OPEN_APP_MANAGE_PLAY_INTEGRITY_API_SETTINGS" />
++                <category android:name="android.intent.category.DEFAULT" />
++                <data android:scheme="package" />
++            </intent-filter>
++
++            <meta-data android:name="com.android.settings.FRAGMENT_CLASS"
++                android:value="com.android.settings.applications.AppManagePlayIntegrityApiFragment"/>
++            <meta-data android:name="com.android.settings.HIGHLIGHT_MENU_KEY"
++                android:value="@string/menu_key_apps"/>
++        </activity>
++
+     </application>
+ </manifest>
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index 9e9643e81d..5aac21a1bc 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -4,4 +4,16 @@
+     <string name="sandboxed_google_play">Sandboxed Google Play</string>
+     <string name="sandboxed_google_play_work_profile">Sandboxed Google Play (work profile)</string>
+     <string name="exploit_protection_settings">Exploit protection</string>
++    <string name="app_play_integrity_api">Play Integrity API</string>
++    <string name="app_play_integrity_top_intro">The Play Integrity API allows services to verify properties of a device through their app. Most services check for the device or strong integrity level, which requires the unmodified stock OS on a device licensed for Google Mobile Services. Not every app that uses it refuses to work on other operating systems. Apps can use the standard Android hardware attestation API to verify the hardware, OS and app instead.</string>
++    <string name="app_play_integrity_contact_app_developer">Contact app developer</string>
++    <string name="app_play_integrity_show_usage_notifications">Show usage notifications</string>
++    <string name="app_play_integrity_block_usage_attempts">Block usage attempts</string>
++    <string name="app_play_integrity_block_usage_attempts_summary_on">
++        Play Integrity API usage attempts will fail with the “API is not available” error code
++    </string>
++    <string name="app_play_integrity_api_blocked">Blocked</string>
++    <string name="app_play_integrity_api_not_blocked">Not blocked</string>
++    <string name="app_play_integrity_see_all_apps">Show apps that used the Play Integrity API</string>
++
+ </resources>
+diff --git a/src/com/android/settings/Settings.java b/src/com/android/settings/Settings.java
+index 5562158557..4546e5c209 100644
+--- a/src/com/android/settings/Settings.java
++++ b/src/com/android/settings/Settings.java
+@@ -684,6 +684,8 @@ public class Settings extends SettingsActivity {
+     public static class ContentProtectionSettingsActivity extends SettingsActivity { /* empty */ }
+     public static class MagnificationActivity extends SettingsActivity { /* empty */ }
+     public static class FlashNotificationsActivity extends SettingsActivity { /* empty */ }
++    public static class AppManagePlayIntegrityApiActivity extends SettingsActivity {}
++
+     public static class NotificationBundlesActivity extends SettingsActivity { /* empty */ }
+     public static class NotificationSummarizationActivity extends SettingsActivity { /* empty */ }
+ 
+diff --git a/src/com/android/settings/applications/AppManagePlayIntegrityApi.kt b/src/com/android/settings/applications/AppManagePlayIntegrityApi.kt
+new file mode 100644
+index 0000000000..788272fcd3
+--- /dev/null
++++ b/src/com/android/settings/applications/AppManagePlayIntegrityApi.kt
+@@ -0,0 +1,138 @@
++package com.android.settings.applications
++
++import android.app.compat.gms.GmsUtils
++import android.content.Context
++import android.content.Intent
++import android.content.pm.ApplicationInfo
++import android.content.pm.GosPackageState
++import android.content.pm.GosPackageStateFlag
++import android.content.pm.PackageManager.NameNotFoundException
++import android.ext.PackageId
++import android.ext.settings.app.AswBlockPlayIntegrityApi
++import android.net.Uri
++import android.os.Bundle
++import androidx.appcompat.app.AlertDialog
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.platform.LocalContext
++import androidx.preference.Preference
++import androidx.preference.PreferenceScreen
++import androidx.preference.SwitchPreferenceCompat
++import com.android.settings.R
++import com.android.settings.spa.app.appinfo.AswPreference
++import com.android.settingslib.spaprivileged.model.app.userId
++import com.android.settingslib.widget.FooterPreference
++
++object AswAdapterManagePlayIntegrityApi : AswAdapter<AswBlockPlayIntegrityApi>() {
++    override fun getAppSwitch() = AswBlockPlayIntegrityApi.I
++
++    override fun getAswTitle(ctx: Context) = ctx.getText(R.string.app_play_integrity_api)
++    override fun getOnTitle(ctx: Context) = ctx.getText(R.string.app_play_integrity_api_blocked)
++    override fun getOffTitle(ctx: Context) = ctx.getText(R.string.app_play_integrity_api_not_blocked)
++
++    override fun getDetailFragmentClass() = AppManagePlayIntegrityApiFragment::class
++
++    override fun shouldIncludeInAppListPage(app: ApplicationInfo, gosPs: GosPackageState): Boolean {
++        return gosPs.hasFlag(GosPackageStateFlag.PLAY_INTEGRITY_API_USED_AT_LEAST_ONCE)
++    }
++}
++
++@Composable
++fun AppManagePlayIntegrityApiPreference(app: ApplicationInfo) {
++    if (GosPackageState.get(app.packageName, app.userId)
++            .hasFlag(GosPackageStateFlag.PLAY_INTEGRITY_API_USED_AT_LEAST_ONCE)) {
++        AswPreference(LocalContext.current, app, AswAdapterManagePlayIntegrityApi)
++    }
++}
++
++class AppManagePlayIntegrityApiFragment : AppInfoWithHeader() {
++    private lateinit var showUsageNotifsSwitch: SwitchPreferenceCompat
++    private lateinit var blockUsageAttemptsSwitch: SwitchPreferenceCompat
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++
++        requireActivity().setTitle(R.string.app_play_integrity_api)
++
++        val prefCtx = prefContext
++        val screen: PreferenceScreen = preferenceManager.createPreferenceScreen(prefCtx)
++
++        FooterPreference(prefCtx).apply {
++            setOrder(-100)
++            setTitle(R.string.app_play_integrity_top_intro)
++            screen.addPreference(this)
++        }
++        Preference(prefCtx).apply {
++            setTitle(R.string.app_play_integrity_contact_app_developer)
++            setOnPreferenceClickListener {
++                val pkgName = mPackageName
++                val intent: Intent
++                if (isPlayStoreAvailable()) {
++                    intent = GmsUtils.createAppPlayStoreIntent(pkgName)
++                } else {
++                    val uri = Uri.parse("https://play.google.com/store/apps/details?id=$pkgName")
++                    intent = Intent.createChooser(Intent(Intent.ACTION_VIEW, uri), null)
++                }
++                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++                startActivity(intent)
++                true
++            }
++            screen.addPreference(this)
++        }
++        showUsageNotifsSwitch = SwitchPreferenceCompat(prefCtx).apply {
++            setTitle(R.string.app_play_integrity_show_usage_notifications)
++            setOnPreferenceChangeListener { _, value ->
++                val ed = GosPackageState.edit(mPackageName, mUserId)
++                AswBlockPlayIntegrityApi.I.setNotificationEnabled(ed, value as Boolean)
++                ed.apply()
++            }
++            screen.addPreference(this)
++        }
++        blockUsageAttemptsSwitch = SwitchPreferenceCompat(prefCtx).apply {
++            setTitle(R.string.app_play_integrity_block_usage_attempts)
++            setSummaryOn(R.string.app_play_integrity_block_usage_attempts_summary_on)
++            setOnPreferenceChangeListener { _, value ->
++                val ed = GosPackageState.edit(mPackageName, mUserId)
++                AswBlockPlayIntegrityApi.I.set(ed, value as Boolean)
++                ed.apply()
++            }
++            screen.addPreference(this)
++        }
++        AswAdapterManagePlayIntegrityApi.addAppListPageLink(
++                screen, getText(R.string.app_play_integrity_see_all_apps))
++
++        setPreferenceScreen(screen)
++    }
++
++    override fun refreshUi(): Boolean {
++        val appInfo = getAppInfo(mPackageName) ?: return false
++        val gosPs = GosPackageState.get(mPackageName, mUserId)
++
++        showUsageNotifsSwitch.isChecked = AswBlockPlayIntegrityApi.I.isNotificationEnabled(gosPs)
++
++        blockUsageAttemptsSwitch.isChecked = AswBlockPlayIntegrityApi.I
++                .get(requireContext(), mUserId, appInfo, gosPs)
++
++        return true
++    }
++
++    private fun isPlayStoreAvailable(): Boolean {
++        val appInfo = getAppInfo(PackageId.PLAY_STORE_NAME) ?: return false
++        if (!appInfo.enabled) {
++            return false
++        }
++        return appInfo.ext().packageId == PackageId.PLAY_STORE
++    }
++
++    private fun getAppInfo(pkgName: String): ApplicationInfo? {
++        val pkgManager = requireContext().packageManager
++        try {
++            return pkgManager.getApplicationInfoAsUser(pkgName, 0, mUserId)
++        } catch (e: NameNotFoundException) {
++            return null
++        }
++    }
++
++    override fun createDialog(id: Int, errorCode: Int): AlertDialog? = null
++
++    override fun getMetricsCategory(): Int = METRICS_CATEGORY_UNKNOWN
++}
+diff --git a/src/com/android/settings/core/gateway/SettingsGateway.java b/src/com/android/settings/core/gateway/SettingsGateway.java
+index 2a05a30620..877b0c5bb4 100644
+--- a/src/com/android/settings/core/gateway/SettingsGateway.java
++++ b/src/com/android/settings/core/gateway/SettingsGateway.java
+@@ -229,6 +229,7 @@ public class SettingsGateway {
+      * security exception if the fragment it needs to display is not in this list.
+      */
+     public static final String[] ENTRY_FRAGMENTS = {
++            com.android.settings.applications.AppManagePlayIntegrityApiFragment.class.getName(),
+             AdvancedConnectedDeviceDashboardFragment.class.getName(),
+             CreateShortcut.class.getName(),
+             BluetoothPairingDetail.class.getName(),
+diff --git a/src/com/android/settings/spa/SettingsSpaEnvironment.kt b/src/com/android/settings/spa/SettingsSpaEnvironment.kt
+index 1481aca56a..1d503108df 100644
+--- a/src/com/android/settings/spa/SettingsSpaEnvironment.kt
++++ b/src/com/android/settings/spa/SettingsSpaEnvironment.kt
+@@ -145,6 +145,11 @@ open class SettingsSpaEnvironment(context: Context) : SpaEnvironment(context) {
+                     )
+                 )
+             }
++            .plus(
++                arrayOf(
++                    com.android.settings.applications.AswAdapterManagePlayIntegrityApi.makeAppListPageProvider(),
++                )
++            )
+ 
+     override val logger =
+         if (FeatureFlagUtils.isEnabled(context, FeatureFlagUtils.SETTINGS_ENABLE_SPA_METRICS))
+diff --git a/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt b/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt
+index 8f91031255..6df9721efc 100644
+--- a/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt
++++ b/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt
+@@ -206,6 +206,7 @@ private fun AppInfoSettings(packageInfoPresenter: PackageInfoPresenter) {
+         }
+ 
+         Category(title = stringResource(R.string.advanced_apps)) {
++            com.android.settings.applications.AppManagePlayIntegrityApiPreference(app)
+             if (android.companion.virtualdevice.flags.Flags.computerControlAccess()) {
+                 ComputerControlAutomationAppListProvider.InfoPageEntryItem(app)
+             }

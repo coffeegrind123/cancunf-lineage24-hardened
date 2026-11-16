@@ -1,0 +1,54 @@
+From d59338f8faf7841b11c108da6e179c887fb0fd97 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Sat, 6 Jan 2024 19:42:35 +0200
+Subject: [PATCH 58/67] define READ_LOGS_FULL permission for promptless logcat
+ access
+
+It's used by the LogViewer app.
+
+(cherry picked from commit fb5382f6a6e8dda4048fd7fc8a6420b7e107b272)
+---
+ core/res/AndroidManifest.xml                         |  5 +++++
+ .../android/server/logcat/LogcatManagerService.java  | 12 ++++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index ac322dc96c..7ba41f8851 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -5820,6 +5820,11 @@
+         android:protectionLevel="signature|privileged|development"
+         android:permissionFlags="allowedInPrivateComputeCore" />
+ 
++
++    <!-- @hide -->
++    <permission android:name="android.permission.READ_LOGS_FULL"
++        android:protectionLevel="signature|privileged" />
++
+     <!-- Allows an application to read the update_engine logs
+     <p>Not for use by third-party applications.
+     @FlaggedApi("com.android.update_engine.minor_changes_2025q4") -->
+diff --git a/services/core/java/com/android/server/logcat/LogcatManagerService.java b/services/core/java/com/android/server/logcat/LogcatManagerService.java
+index fee54f5ed3..09614925e1 100644
+--- a/services/core/java/com/android/server/logcat/LogcatManagerService.java
++++ b/services/core/java/com/android/server/logcat/LogcatManagerService.java
+@@ -426,7 +426,19 @@ public final class LogcatManagerService extends SystemService {
+         return procState == ActivityManager.PROCESS_STATE_TOP;
+     }
+ 
++    private boolean isPrivilegedClient(LogAccessClient client) {
++        PackageManager pm = mContext.getPackageManager();
++        String perm = android.Manifest.permission.READ_LOGS_FULL;
++        return pm.checkPermission(perm, client.mPackageName) == PackageManager.PERMISSION_GRANTED;
++    }
++
+     private void processNewLogAccessRequest(LogAccessClient client) {
++        if (isPrivilegedClient(client)) {
++            onAccessApprovedForClient(client);
++            Slog.d(TAG, "approved LogAccessRequest for privileged client: " + client.mPackageName);
++            return;
++        }
++
+         boolean isInstrumented = mActivityManagerInternal.getInstrumentationSourceUid(client.mUid)
+                 != android.os.Process.INVALID_UID;
+         // The instrumented apks only run for testing, so we don't check user permission.

@@ -1,0 +1,194 @@
+From cb012d6d9741e827e86e8f66b63142208cc44961 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 8 Aug 2022 19:03:37 +0300
+Subject: [PATCH 57/67] add option to view application error details in
+ LogViewer app
+
+Adds a "Show details" item to crash and ANR (app not responding) dialogs which opens the LogViewer
+app.
+
+(cherry picked from commit c64747ea3140958cdfccd7c42c475fb966b77886)
+Change-Id: I82d4e249ffaac51127a34a0238571ff493e60de5
+---
+ .../android/app/ApplicationErrorReport.java   | 33 ++++++++++++++++++-
+ core/res/res/layout/app_anr_dialog.xml        |  4 +--
+ core/res/res/layout/app_error_dialog.xml      |  4 +--
+ core/res/res/values/public-ext.xml            |  2 ++
+ core/res/res/values/strings.xml               |  3 ++
+ .../java/com/android/server/am/AppErrors.java |  1 +
+ 6 files changed, 42 insertions(+), 5 deletions(-)
+
+diff --git a/core/java/android/app/ApplicationErrorReport.java b/core/java/android/app/ApplicationErrorReport.java
+index 02955136d4..691e96c2d8 100644
+--- a/core/java/android/app/ApplicationErrorReport.java
++++ b/core/java/android/app/ApplicationErrorReport.java
+@@ -25,6 +25,8 @@ import android.content.pm.ResolveInfo;
+ import android.os.Binder;
+ import android.os.Parcel;
+ import android.os.Parcelable;
++import android.os.Process;
++import android.os.SystemClock;
+ import android.os.SystemProperties;
+ import android.provider.Settings;
+ import android.util.Printer;
+@@ -98,6 +100,9 @@ public class ApplicationErrorReport implements Parcelable {
+      */
+     public String packageName;
+ 
++    /** @hide */
++    public ApplicationInfo applicationInfo;
++
+     /**
+      * Package name of the application which installed the application this
+      * report pertains to.
+@@ -162,13 +167,19 @@ public class ApplicationErrorReport implements Parcelable {
+             String packageName, int appFlags) {
+         // check if error reporting is enabled in secure settings
+         int enabled = Settings.Global.getInt(context.getContentResolver(),
+-                Settings.Global.SEND_ACTION_APP_ERROR, 0);
++                Settings.Global.SEND_ACTION_APP_ERROR, 1);
+         if (enabled == 0) {
+             return null;
+         }
+ 
+         PackageManager pm = context.getPackageManager();
+ 
++        ComponentName logViewerApp = getErrorReportReceiver(pm, packageName,
++                android.ext.LogViewerApp.getPackageName());
++        if (logViewerApp != null) {
++            return logViewerApp;
++        }
++
+         // look for receiver in the installer package
+         String candidate = null;
+         ComponentName result = null;
+@@ -233,6 +244,11 @@ public class ApplicationErrorReport implements Parcelable {
+     public void writeToParcel(Parcel dest, int flags) {
+         dest.writeInt(type);
+         dest.writeString(packageName);
++        ApplicationInfo appInfo = applicationInfo;
++        dest.writeBoolean(appInfo != null);
++        if (appInfo != null) {
++            appInfo.writeToParcel(dest, 0);
++        }
+         dest.writeString(installerPackageName);
+         dest.writeString(processName);
+         dest.writeLong(time);
+@@ -260,6 +276,9 @@ public class ApplicationErrorReport implements Parcelable {
+     public void readFromParcel(Parcel in) {
+         type = in.readInt();
+         packageName = in.readString();
++        if (in.readBoolean()) {
++            applicationInfo = ApplicationInfo.CREATOR.createFromParcel(in);
++        }
+         installerPackageName = in.readString();
+         processName = in.readString();
+         time = in.readLong();
+@@ -345,6 +364,11 @@ public class ApplicationErrorReport implements Parcelable {
+          */
+         public String crashTag;
+ 
++        /** @hide */
++        public long processUptimeMs;
++        /** @hide */
++        public long processStartupLatencyMs;
++
+         /**
+          * Create an uninitialized instance of CrashInfo.
+          */
+@@ -398,6 +422,9 @@ public class ApplicationErrorReport implements Parcelable {
+             }
+ 
+             exceptionMessage = sanitizeString(exceptionMessage);
++
++            processUptimeMs = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime();
++            processStartupLatencyMs = Process.getStartElapsedRealtime() - Process.getStartRequestedElapsedRealtime();
+         }
+ 
+         /** @hide */
+@@ -439,6 +466,8 @@ public class ApplicationErrorReport implements Parcelable {
+             throwLineNumber = in.readInt();
+             stackTrace = in.readString();
+             crashTag = in.readString();
++            processUptimeMs = in.readLong();
++            processStartupLatencyMs = in.readLong();
+         }
+ 
+         /**
+@@ -455,6 +484,8 @@ public class ApplicationErrorReport implements Parcelable {
+             dest.writeInt(throwLineNumber);
+             dest.writeString(stackTrace);
+             dest.writeString(crashTag);
++            dest.writeLong(processUptimeMs);
++            dest.writeLong(processStartupLatencyMs);
+             int total = dest.dataPosition()-start;
+             if (Binder.CHECK_PARCEL_SIZE && total > 20*1024) {
+                 Slog.d("Error", "ERR: exHandler=" + exceptionHandlerClassName);
+diff --git a/core/res/res/layout/app_anr_dialog.xml b/core/res/res/layout/app_anr_dialog.xml
+index 5ad0f4c0f6..ad3a2d2991 100644
+--- a/core/res/res/layout/app_anr_dialog.xml
++++ b/core/res/res/layout/app_anr_dialog.xml
+@@ -41,8 +41,8 @@
+             android:id="@+id/aerr_report"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:text="@string/aerr_report"
+-            android:drawableStart="@drawable/ic_feedback"
++            android:text="@string/aerr_show_details"
++            android:drawableStart="@drawable/ic_info_outline_24"
+             style="@style/aerr_list_item" />
+ 
+ </LinearLayout>
+diff --git a/core/res/res/layout/app_error_dialog.xml b/core/res/res/layout/app_error_dialog.xml
+index c3b149a1e2..a47b820183 100644
+--- a/core/res/res/layout/app_error_dialog.xml
++++ b/core/res/res/layout/app_error_dialog.xml
+@@ -52,8 +52,8 @@
+         android:id="@+id/aerr_report"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+-        android:text="@string/aerr_report"
+-        android:drawableStart="@drawable/ic_feedback"
++        android:text="@string/aerr_show_details"
++        android:drawableStart="@drawable/ic_info_outline_24"
+         style="@style/aerr_list_item" />
+ 
+     <Button
+diff --git a/core/res/res/values/public-ext.xml b/core/res/res/values/public-ext.xml
+index 05a278a859..d969b63cd9 100644
+--- a/core/res/res/values/public-ext.xml
++++ b/core/res/res/values/public-ext.xml
+@@ -17,5 +17,7 @@
+     <staging-public-group type="string" first-id="0x0198f000">
+         <!-- @hide -->
+         <public name="config_first_party_app_source_package_name"/>
++        <!-- @hide -->
++        <public name="aerr_show_details"/>
+     </staging-public-group>
+ </resources>
+diff --git a/core/res/res/values/strings.xml b/core/res/res/values/strings.xml
+index 4d98c8b87e..1a40db37ef 100644
+--- a/core/res/res/values/strings.xml
++++ b/core/res/res/values/strings.xml
+@@ -7285,6 +7285,9 @@
+     <!-- Fingerprint failed rate too high notification msg -->
+     <string name="fingerprint_frr_notification_msg">Tap to review tips to improve your unlocking experience</string>
+ 
++    <!-- Button that opens the screen with details of an application error -->
++    <string name="aerr_show_details">Show details</string>
++    <java-symbol type="string" name="aerr_show_details" />
+     <!-- Label describing no blinking for Settings.Secure.ACCESSIBILITY_TEXT_CURSOR_BLINK_INTERVAL_MS. -->
+     <string name="no_blink_accessibility_text_cursor_blink_label">Don\'t blink</string>
+ 
+diff --git a/services/core/java/com/android/server/am/AppErrors.java b/services/core/java/com/android/server/am/AppErrors.java
+index 245a64e98f..7dc3c00e97 100644
+--- a/services/core/java/com/android/server/am/AppErrors.java
++++ b/services/core/java/com/android/server/am/AppErrors.java
+@@ -889,6 +889,7 @@ class AppErrors {
+ 
+         ApplicationErrorReport report = new ApplicationErrorReport();
+         report.packageName = r.info.packageName;
++        report.applicationInfo = r.info;
+         report.installerPackageName = errState.getErrorReportReceiver().getPackageName();
+         report.processName = r.processName;
+         report.time = timeMillis;

@@ -1,0 +1,2410 @@
+From 18237b19a1f7a2e957c40ecc0afbfcecf76c6414 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 9 Oct 2026 06:06:53 +0000
+Subject: [PATCH 37/67] gmscompat: switch from RpcProvider to service bindings
+ and broadcasts
+
+Previously, service binders were provided through the RpcProvider in GmsCompat app. The previous
+approach had the following issues, which are resolved with the new approach:
+- calls from GmsCompat app to its clients failed when the clients were frozen
+- GmsCompat app was killed before its clients in some cases
+- GmsCore file proxy service was incompatible with persistent GmsCore process no longer being used
+since 26.33.31 version
+
+Additional changes:
+- for GmsCore 26.33.31 and later, code that ran in the persistent GmsCore process now runs in the
+main GmsCore process
+- related improvements to the partial reimplementation of the android.provider.Settings API
+- removal of unused code for limiting max allowed GmsCore and Play Store versions
+
+(cherry picked from commit b75a554f7fff299349587a0b675e3b08132a32d8)
+---
+ core/java/android/app/Activity.java           |   7 +-
+ core/java/android/app/LoadedApk.java          |  32 ++
+ .../java/android/app/NotificationManager.java |   6 +-
+ .../android/app/compat/gms/GmsCompat.java     |   4 +-
+ .../app/compat/gms/GmsModuleHooks.java        |  15 +-
+ .../java/android/content/ContentResolver.java |   9 +-
+ .../content/pm/AppPermissionUtils.java        |   4 +-
+ .../android/content/pm/PackageInstaller.java  |  14 -
+ .../android/credentials/CredentialOption.java |   9 +-
+ core/java/android/provider/Settings.java      |   8 +-
+ .../internal/gmscompat/GmcBinderDefs.java     |  18 +-
+ ...2Gms.java => GmcConfigChangeListener.java} |  61 ++-
+ .../gmscompat/GmcMediaProjectionService.java  |   9 +-
+ .../gmscompat/GmcPrivSettingsHooks.java       | 182 +++++++++
+ .../internal/gmscompat/GmsCompatApp.java      | 356 ++++-------------
+ .../android/internal/gmscompat/GmsHooks.java  |  79 ++--
+ .../gmscompat/IClientOfGmsCore2Gca.aidl       |   4 -
+ .../android/internal/gmscompat/IGca2Gms.aidl  |  16 -
+ .../android/internal/gmscompat/IGms2Gca.aidl  |  12 +-
+ .../internal/gmscompat/PlayStoreHooks.java    |  50 +--
+ .../dynamite/GmsDynamiteClientHooks.java      |   1 -
+ .../fileservice/GmsCoreFileProxyService.java  |  20 +
+ .../GmsCoreFileServerClientHooks.java         |  94 ++---
+ .../sysservice/GmcPackageManager.java         |   2 +-
+ .../gmscompat/util/GmcActivityUtils.java      |  13 +-
+ .../util/SynchronousServiceBinding.java       | 374 ++++++++++++++++++
+ .../server/pm/PackageInstallerSession.java    |   8 +-
+ .../server/pm/ext/AndroidAutoHooks.java       |   7 +-
+ .../server/pm/ext/GCarrierSettingsHooks.java  |   2 +-
+ .../server/pm/ext/GmsCompatPackageHooks.java  |  31 ++
+ .../pm/ext/GmsCompatPkgParsingHooks.java      |   6 +-
+ .../android/server/pm/ext/GmsCoreHooks.java   |  22 +-
+ .../server/pm/ext/PackageHooksRegistry.java   |   8 +-
+ 33 files changed, 889 insertions(+), 594 deletions(-)
+ rename core/java/com/android/internal/gmscompat/{BinderGca2Gms.java => GmcConfigChangeListener.java} (57%)
+ create mode 100644 core/java/com/android/internal/gmscompat/GmcPrivSettingsHooks.java
+ delete mode 100644 core/java/com/android/internal/gmscompat/IGca2Gms.aidl
+ create mode 100644 core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileProxyService.java
+ create mode 100644 core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java
+ create mode 100644 services/core/java/com/android/server/pm/ext/GmsCompatPackageHooks.java
+
+diff --git a/core/java/android/app/Activity.java b/core/java/android/app/Activity.java
+index d7baf9e230..6e818cf7ac 100644
+--- a/core/java/android/app/Activity.java
++++ b/core/java/android/app/Activity.java
+@@ -6098,11 +6098,8 @@ public class Activity extends ContextThemeWrapper
+                             }
+ 
+                             if (!installed) {
+-                                try {
+-                                    GmsCompatApp.iClientOfGmsCore2Gca().showMissingAppNotification(pkg);
+-                                } catch (RemoteException e) {
+-                                    GmsCompatApp.callFailed(e);
+-                                }
++                                GmsCompatApp.iClientOfGmsCore2Gca().voidCallOrExit(i ->
++                                        i.showMissingAppNotification(pkg));
+                             }
+                         }
+                     }
+diff --git a/core/java/android/app/LoadedApk.java b/core/java/android/app/LoadedApk.java
+index 6560565d52..c7a249605f 100644
+--- a/core/java/android/app/LoadedApk.java
++++ b/core/java/android/app/LoadedApk.java
+@@ -28,6 +28,7 @@ import android.compat.annotation.UnsupportedAppUsage;
+ import android.content.BroadcastReceiver;
+ import android.content.ComponentName;
+ import android.content.Context;
++import android.content.ContextWrapper;
+ import android.content.IIntentReceiver;
+ import android.content.Intent;
+ import android.content.ServiceConnection;
+@@ -74,6 +75,7 @@ import android.view.DisplayAdjustments;
+ import com.android.internal.R;
+ import com.android.internal.annotations.GuardedBy;
+ import com.android.internal.gmscompat.GmcDebug;
++import com.android.internal.gmscompat.util.SynchronousServiceBinding;
+ import com.android.internal.os.DebugStore;
+ import com.android.internal.os.RuntimeInit;
+ import com.android.internal.util.ArrayUtils;
+@@ -2217,9 +2219,39 @@ public final class LoadedApk {
+         synchronized (mServices) {
+             ArrayMap<ServiceConnection, LoadedApk.ServiceDispatcher> map
+                     = mServices.get(context);
++            if (map == null
++                    && c instanceof SynchronousServiceBinding.ServiceConnectionImpl
++                    && context instanceof ContextWrapper contextWrapper) {
++                // SynchronousServiceBinding is used by GmsCompat before app's Application class
++                // is initialized, which leads to a context mismatch between bindService() and
++                // unbindService(). Those methods use ContextImpl.getOuterContext(), which
++                // gets overwritten after Application class init.
++                Context baseContext = contextWrapper.getBaseContext();
++                map = mServices.get(baseContext);
++                if (map != null) {
++                    context = baseContext;
++                    Log.d(TAG, "forgetServiceDispatcher: using baseContext for SynchronousServiceBinding," +
++                            " original services map is null");
++                }
++            }
+             LoadedApk.ServiceDispatcher sd = null;
+             if (map != null) {
+                 sd = map.get(c);
++                if (sd == null
++                        && c instanceof SynchronousServiceBinding.ServiceConnectionImpl
++                        && context instanceof ContextWrapper contextWrapper) {
++                    // see SynchronousServiceBinding comment above
++                    Context baseContext = contextWrapper.getBaseContext();
++                    ArrayMap<ServiceConnection, LoadedApk.ServiceDispatcher> baseMap = mServices.get(baseContext);
++                    if (baseMap != null) {
++                        sd = baseMap.get(c);
++                        if (sd != null) {
++                            map = baseMap;
++                            context = baseContext;
++                            Log.d(TAG, "forgetServiceDispatcher: using baseContext for SynchronousServiceBinding");
++                        }
++                    }
++                }
+                 if (sd != null) {
+                     if (DEBUG) Slog.d(TAG, "Removing dispatcher " + sd + " for conn " + c);
+                     map.remove(c);
+diff --git a/core/java/android/app/NotificationManager.java b/core/java/android/app/NotificationManager.java
+index 2556da6f64..dc3c2b0737 100644
+--- a/core/java/android/app/NotificationManager.java
++++ b/core/java/android/app/NotificationManager.java
+@@ -925,11 +925,7 @@ public class NotificationManager {
+         if (GmsCompat.isEnabled()) {
+             if (GmsCompat.isGmsCore() && !GmsCompat.hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+                 String pkg = GmsCompat.appContext().getPackageName();
+-                try {
+-                    GmsCompatApp.iGms2Gca().showMissingPostNotifsPermissionNotification(pkg);
+-                } catch (RemoteException e) {
+-                    GmsCompatApp.callFailed(e);
+-                }
++                GmsCompatApp.voidCall(i -> i.showMissingPostNotifsPermissionNotification(pkg));
+             }
+         }
+ 
+diff --git a/core/java/android/app/compat/gms/GmsCompat.java b/core/java/android/app/compat/gms/GmsCompat.java
+index ee3f5dfac7..24788c02c0 100644
+--- a/core/java/android/app/compat/gms/GmsCompat.java
++++ b/core/java/android/app/compat/gms/GmsCompat.java
+@@ -21,6 +21,7 @@ import android.os.SystemProperties;
+ import android.os.UserHandle;
+ import android.util.Log;
+ 
++import com.android.internal.gmscompat.GmsCompatConfig;
+ import com.android.internal.gmscompat.GmsCompatLib;
+ import com.android.internal.gmscompat.GmsHooks;
+ import com.android.internal.gmscompat.GmsInfo;
+@@ -286,7 +287,8 @@ public final class GmsCompat {
+     public static boolean hasPermission(@NonNull String perm) {
+         Context ctx = appContext();
+ 
+-        if (GmsHooks.config().shouldSpoofSelfPermissionCheck(perm)) {
++        GmsCompatConfig config = GmsHooks.config();
++        if (config != null && config.shouldSpoofSelfPermissionCheck(perm)) {
+             // result of checkSelfPermission() below would be spoofed, ask the PackageManager directly
+             IPackageManager pm = ActivityThread.getPackageManager();
+             try {
+diff --git a/core/java/android/app/compat/gms/GmsModuleHooks.java b/core/java/android/app/compat/gms/GmsModuleHooks.java
+index 540e15962b..1a334bd35d 100644
+--- a/core/java/android/app/compat/gms/GmsModuleHooks.java
++++ b/core/java/android/app/compat/gms/GmsModuleHooks.java
+@@ -24,11 +24,10 @@ import android.annotation.SystemApi;
+ import android.app.Activity;
+ import android.bluetooth.BluetoothAdapter;
+ import android.content.Intent;
+-import android.os.Build;
+-import android.os.RemoteException;
+ import android.provider.Settings;
+ import android.util.Log;
+ 
++import com.android.internal.gmscompat.GmcPrivSettingsHooks;
+ import com.android.internal.gmscompat.GmsCompatApp;
+ import com.android.internal.gmscompat.GmsHooks;
+ import com.android.internal.gmscompat.StubDef;
+@@ -60,11 +59,7 @@ public class GmsModuleHooks {
+             if (GmsCompat.hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
+                 activity.startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE));
+             } else {
+-                try {
+-                    GmsCompatApp.iGms2Gca().showGmsCoreMissingNearbyDevicesPermissionGeneric();
+-                } catch (RemoteException e) {
+-                    GmsCompatApp.callFailed(e);
+-                }
++                GmsCompatApp.voidCall(i -> i.showGmsCoreMissingNearbyDevicesPermissionGeneric());
+             }
+         } // else don't bother the user
+ 
+@@ -106,15 +101,15 @@ public class GmsModuleHooks {
+ 
+     @Nullable
+     public static String deviceConfigGetProperty(@NonNull String namespace, @NonNull String name) {
+-        return GmsCompatApp.getString(GmsCompatApp.deviceConfigNamespace(namespace), name);
++        return GmcPrivSettingsHooks.getString(GmcPrivSettingsHooks.deviceConfigNamespace(namespace), name);
+     }
+ 
+     public static boolean deviceConfigSetProperty(@NonNull String namespace, @NonNull String name, @Nullable String value) {
+-        return GmsCompatApp.putString(GmsCompatApp.deviceConfigNamespace(namespace), name, value);
++        return GmcPrivSettingsHooks.putString(GmcPrivSettingsHooks.deviceConfigNamespace(namespace), name, value);
+     }
+ 
+     public static boolean deviceConfigSetProperties(@NonNull android.provider.DeviceConfig.Properties properties) {
+-        return GmsCompatApp.setProperties(properties);
++        return GmcPrivSettingsHooks.setProperties(properties);
+     }
+ 
+     private GmsModuleHooks() {}
+diff --git a/core/java/android/content/ContentResolver.java b/core/java/android/content/ContentResolver.java
+index bd8d1bb6b5..92f7bf003b 100644
+--- a/core/java/android/content/ContentResolver.java
++++ b/core/java/android/content/ContentResolver.java
+@@ -81,9 +81,8 @@ import android.util.SparseArray;
+ 
+ import com.android.internal.annotations.GuardedBy;
+ import com.android.internal.app.ContentProviderRedirector;
+-import com.android.internal.gmscompat.GmsCompatApp;
++import com.android.internal.gmscompat.GmcPrivSettingsHooks;
+ import com.android.internal.gmscompat.GmsHooks;
+-import com.android.internal.gmscompat.PlayStoreHooks;
+ import com.android.internal.gmscompat.dynamite.GmsDynamiteClientHooks;
+ import com.android.internal.util.MimeIconUtils;
+ 
+@@ -2866,7 +2865,7 @@ public abstract class ContentResolver implements ContentInterface {
+             return;
+         }
+         if (GmsCompat.isEnabled()) {
+-            if (GmsCompatApp.registerObserver(uri, observer)) {
++            if (GmcPrivSettingsHooks.maybeRegisterObserver(uri, observer)) {
+                 return;
+             }
+         }
+@@ -2892,9 +2891,7 @@ public abstract class ContentResolver implements ContentInterface {
+         }
+ 
+         if (GmsCompat.isEnabled()) {
+-            if (GmsCompatApp.unregisterObserver(observer)) {
+-                return;
+-            }
++            GmcPrivSettingsHooks.unregisterObserver(observer);
+         }
+ 
+         try {
+diff --git a/core/java/android/content/pm/AppPermissionUtils.java b/core/java/android/content/pm/AppPermissionUtils.java
+index 6d3a18f635..ba0c9ac5f6 100644
+--- a/core/java/android/content/pm/AppPermissionUtils.java
++++ b/core/java/android/content/pm/AppPermissionUtils.java
+@@ -22,6 +22,7 @@ import android.app.compat.gms.GmsCompat;
+ 
+ import com.android.internal.app.ContactScopes;
+ import com.android.internal.app.StorageScopesAppHooks;
++import com.android.internal.gmscompat.GmsCompatConfig;
+ import com.android.internal.gmscompat.GmsHooks;
+ 
+ /** @hide */
+@@ -48,7 +49,8 @@ public class AppPermissionUtils {
+         }
+ 
+         if (GmsCompat.isEnabled()) {
+-            if (GmsHooks.config().shouldSpoofSelfPermissionCheck(permName)) {
++            GmsCompatConfig config = GmsHooks.config();
++            if (config != null && config.shouldSpoofSelfPermissionCheck(permName)) {
+                 return true;
+             }
+         }
+diff --git a/core/java/android/content/pm/PackageInstaller.java b/core/java/android/content/pm/PackageInstaller.java
+index 7bb640f7f8..ffc82829c1 100644
+--- a/core/java/android/content/pm/PackageInstaller.java
++++ b/core/java/android/content/pm/PackageInstaller.java
+@@ -1052,10 +1052,6 @@ public class PackageInstaller {
+      *         session is finalized. IDs are not reused during a given boot.
+      */
+     public int createSession(@NonNull SessionParams params) throws IOException {
+-        if (GmsCompat.isPlayStore()) {
+-            PlayStoreHooks.adjustSessionParams(params);
+-        }
+-
+         try {
+             return mInstaller.createSession(params, mInstallerPackageName, mAttributionTag,
+                     mUserId);
+@@ -3239,13 +3235,6 @@ public class PackageInstaller {
+         public PersistableBundle extensionParams;
+ 
+         private volatile ArrayMap<String, Integer> mPermissionStates;
+-        /**
+-         * @hide
+-         *
+-         * Used by gmscompat to disallow updates to unknown versions of GmsCore and Play Store.
+-         */
+-        @SuppressLint("MutableBareField")
+-        public long maxAllowedVersion = Long.MAX_VALUE;
+ 
+         /** @hide */
+         public static final int MAX_URI_LENGTH = 2048;
+@@ -3309,7 +3298,6 @@ public class PackageInstaller {
+             dexoptCompilerFilter = source.readString();
+             forceVerification = source.readBoolean();
+             isAutoInstallDependenciesEnabled = source.readBoolean();
+-            maxAllowedVersion = source.readLong();
+             extensionParams = source.readPersistableBundle();
+         }
+ 
+@@ -3349,7 +3337,6 @@ public class PackageInstaller {
+             ret.dexoptCompilerFilter = dexoptCompilerFilter;
+             ret.forceVerification = forceVerification;
+             ret.isAutoInstallDependenciesEnabled = isAutoInstallDependenciesEnabled;
+-            ret.maxAllowedVersion = maxAllowedVersion;
+             ret.extensionParams = extensionParams;
+             return ret;
+         }
+@@ -4232,7 +4219,6 @@ public class PackageInstaller {
+             dest.writeString(dexoptCompilerFilter);
+             dest.writeBoolean(forceVerification);
+             dest.writeBoolean(isAutoInstallDependenciesEnabled);
+-            dest.writeLong(maxAllowedVersion);
+             dest.writePersistableBundle(extensionParams);
+         }
+ 
+diff --git a/core/java/android/credentials/CredentialOption.java b/core/java/android/credentials/CredentialOption.java
+index 2a8c5ac4fe..9507387493 100644
+--- a/core/java/android/credentials/CredentialOption.java
++++ b/core/java/android/credentials/CredentialOption.java
+@@ -29,7 +29,6 @@ import android.ext.PackageId;
+ import android.os.Bundle;
+ import android.os.Parcel;
+ import android.os.Parcelable;
+-import android.os.RemoteException;
+ import android.util.ArraySet;
+ import android.util.Log;
+ 
+@@ -298,12 +297,8 @@ public final class CredentialOption implements Parcelable {
+                     Log.d("GmsCompat", "ignored CredentialOption.setIsSystemProviderRequired(true) for " +
+                             "TYPE_GOOGLE_ID_TOKEN_CREDENTIAL", new Throwable());
+                     mIsSystemProviderRequired = false;
+-
+-                    try {
+-                        GmsCompatApp.iClientOfGmsCore2Gca().onGoogleIdCredentialOptionInit();
+-                    } catch (RemoteException e) {
+-                        throw GmsCompatApp.callFailed(e);
+-                    }
++                    GmsCompatApp.iClientOfGmsCore2Gca().voidCallOrExit(i ->
++                            i.onGoogleIdCredentialOptionInit());
+                     return this;
+                 }
+             }
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index 020a89d957..6e9ef56cbf 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -111,7 +111,7 @@ import android.view.WindowManager.LayoutParams;
+ import android.widget.Editor;
+ 
+ import com.android.internal.annotations.GuardedBy;
+-import com.android.internal.gmscompat.GmsCompatApp;
++import com.android.internal.gmscompat.GmcPrivSettingsHooks;
+ import com.android.internal.util.Preconditions;
+ 
+ import java.io.IOException;
+@@ -3764,7 +3764,7 @@ public final class Settings {
+         }
+ 
+         // Returns last path component of the relevant Uri.
+-        // Keep in sync with GmsCompatApp#registerObserver
++        // Keep in sync with GmcPrivSettingsHooks#maybeRegisterObserver
+         private String maybeGetGmsCompatNamespace() {
+             Uri uri = mUri;
+             // no need to use expensive equals() method in this case
+@@ -3783,7 +3783,7 @@ public final class Settings {
+             if (GmsCompat.isEnabled()) {
+                 String ns = maybeGetGmsCompatNamespace();
+                 if (ns != null && !mAllFields.contains(name)) {
+-                    return GmsCompatApp.putString(ns, name, value);
++                    return GmcPrivSettingsHooks.putString(ns, name, value);
+                 }
+                 return false;
+             }
+@@ -3865,7 +3865,7 @@ public final class Settings {
+                 String ns = maybeGetGmsCompatNamespace();
+                 if (ns != null) {
+                     if (!mAllFields.contains(name) && !name.startsWith("gmscompat")) {
+-                        return GmsCompatApp.getString(ns, name);
++                        return GmcPrivSettingsHooks.getString(ns, name);
+                     }
+                 }
+             }
+diff --git a/core/java/com/android/internal/gmscompat/GmcBinderDefs.java b/core/java/com/android/internal/gmscompat/GmcBinderDefs.java
+index 6b88d67855..43bafda59d 100644
+--- a/core/java/com/android/internal/gmscompat/GmcBinderDefs.java
++++ b/core/java/com/android/internal/gmscompat/GmcBinderDefs.java
+@@ -10,9 +10,7 @@ import android.content.IntentFilter;
+ import android.os.BinderDef;
+ import android.os.HybridBinder;
+ import android.os.IBinder;
+-import android.os.RemoteException;
+ import android.util.ArrayMap;
+-import android.util.ArraySet;
+ import android.util.Log;
+ 
+ public class GmcBinderDefs {
+@@ -50,16 +48,10 @@ public class GmcBinderDefs {
+         int processState = ActivityThread.currentActivityThread().getProcessState();
+ 
+         BinderDef maybeBinderDef;
+-        try {
+-            if (GmsCompat.isEnabled()) {
+-                maybeBinderDef = GmsCompatApp.iGms2Gca()
+-                        .maybeGetBinderDef(pkgName, processState, iface);
+-            } else {
+-                maybeBinderDef = GmsCompatApp.iClientOfGmsCore2Gca()
+-                        .maybeGetBinderDef(pkgName, processState, iface);
+-            }
+-        } catch (RemoteException e) {
+-            throw GmsCompatApp.callFailed(e);
++        if (GmsCompat.isEnabled()) {
++            maybeBinderDef = GmsCompatApp.call(i -> i.maybeGetBinderDef(pkgName, processState, iface));
++        } else {
++            maybeBinderDef = GmsCompatApp.iClientOfGmsCore2Gca().callOrExit(i -> i.maybeGetBinderDef(pkgName, processState, iface));
+         }
+ 
+         synchronized (seenInterfaces) {
+@@ -86,7 +78,7 @@ public class GmcBinderDefs {
+         static void register(Context ctx) {
+             var l = new BinderDefStateListener();
+             var filter = new IntentFilter(INTENT_ACTION);
+-            String permission = GmsCompatApp.SIGNATURE_PROTECTED_PERMISSION;
++            String permission = GmsCompatApp.SELF_PERMISSION;
+             ctx.registerReceiver(l, filter, permission, null, Context.RECEIVER_EXPORTED);
+         }
+ 
+diff --git a/core/java/com/android/internal/gmscompat/BinderGca2Gms.java b/core/java/com/android/internal/gmscompat/GmcConfigChangeListener.java
+similarity index 57%
+rename from core/java/com/android/internal/gmscompat/BinderGca2Gms.java
+rename to core/java/com/android/internal/gmscompat/GmcConfigChangeListener.java
+index 09b773a5ff..1db11fac81 100644
+--- a/core/java/com/android/internal/gmscompat/BinderGca2Gms.java
++++ b/core/java/com/android/internal/gmscompat/GmcConfigChangeListener.java
+@@ -1,8 +1,10 @@
+ package com.android.internal.gmscompat;
+ 
+-import android.app.Activity;
+ import android.app.compat.gms.GmsCompat;
++import android.content.BroadcastReceiver;
++import android.content.Context;
+ import android.content.Intent;
++import android.content.IntentFilter;
+ import android.database.Cursor;
+ import android.database.sqlite.SQLiteDatabase;
+ import android.database.sqlite.SQLiteOpenHelper;
+@@ -10,29 +12,33 @@ import android.util.ArraySet;
+ import android.util.Log;
+ 
+ import com.android.internal.gmscompat.flags.GmsFlagOverrides;
+-import com.android.internal.gmscompat.util.GmcActivityUtils;
+ 
+-import java.util.concurrent.Callable;
+-import java.util.concurrent.ExecutionException;
+-import java.util.concurrent.FutureTask;
+-
+-import static com.android.internal.gmscompat.GmsHooks.inPersistentGmsCoreProcess;
++import static com.android.internal.gmscompat.GmsHooks.inMainGmsCoreProcess;
+ import static com.android.internal.gmscompat.GmsInfo.PACKAGE_GMS_CORE;
+ 
+-// see IGca2Gms
+-class BinderGca2Gms extends IGca2Gms.Stub {
+-    private static final String TAG = "BinderGca2Gms";
+-    private static final boolean DEV = false;
++class GmcConfigChangeListener extends BroadcastReceiver {
++    private static final String TAG = "GmcConfigChangeListener";
++
++    static void register(Context context) {
++        var receiver = new GmcConfigChangeListener();
++        var filter = new IntentFilter(GmsCompatApp.CONFIG_UPDATED_BROADCAST);
++        context.registerReceiver(receiver, filter, GmsCompatApp.SELF_PERMISSION,
++                GmsHooks.getBackgroundHandler(), Context.RECEIVER_EXPORTED);
++    }
++
++    private GmcConfigChangeListener() {}
+ 
+     @Override
+-    public void updateConfig(GmsCompatConfig newConfig) {
++    public void onReceive(Context context, Intent intent) {
++        Log.i(TAG, "onReceive: " + intent);
++        GmsCompatConfig newConfig = GmsCompatApp.call(i -> i.getConfig());
+         GmsHooks.setConfig(newConfig);
++        onConfigUpdated(newConfig);
+     }
+ 
+-    @Override
+-    public void invalidateConfigCaches() {
+-        if (!inPersistentGmsCoreProcess) {
+-            throw new IllegalStateException();
++    private static void onConfigUpdated(GmsCompatConfig newConfig) {
++        if (!inMainGmsCoreProcess) {
++            return;
+         }
+ 
+         SQLiteOpenHelper phenotypeDb = GmsHooks.getPhenotypeDb();
+@@ -41,7 +47,7 @@ class BinderGca2Gms extends IGca2Gms.Stub {
+             // shouldn't happen in practice, phenotype db is opened on startup
+             Log.e(TAG, "phenotypeDb is null");
+         } else {
+-            notifyForceDefaultFlagsChanged(phenotypeDb, GmsHooks.config());
++            notifyForceDefaultFlagsChanged(phenotypeDb, newConfig);
+         }
+ 
+         GmsFlagOverrides.applyOverrides();
+@@ -74,25 +80,4 @@ class BinderGca2Gms extends IGca2Gms.Stub {
+             GmsCompat.appContext().sendBroadcast(i);
+         }
+     }
+-
+-    @Override
+-    public boolean startActivityIfVisible(Intent intent) {
+-        Callable<Boolean> callable = () -> {
+-            Activity activity = GmcActivityUtils.getMostRecentVisibleActivity();
+-            if (activity == null) {
+-                return false;
+-            }
+-            activity.startActivity(intent);
+-            return true;
+-        };
+-        var task = new FutureTask<>(callable);
+-        // getMostRecentVisibleActivity() needs to be called from main thread to avoid races
+-        GmsCompat.appContext().getMainThreadHandler().post(task);
+-        try {
+-            return task.get().booleanValue();
+-        } catch (InterruptedException | ExecutionException e) {
+-            e.printStackTrace();
+-            return false;
+-        }
+-    }
+ }
+diff --git a/core/java/com/android/internal/gmscompat/GmcMediaProjectionService.java b/core/java/com/android/internal/gmscompat/GmcMediaProjectionService.java
+index f71ecb2e88..9d227bb484 100644
+--- a/core/java/com/android/internal/gmscompat/GmcMediaProjectionService.java
++++ b/core/java/com/android/internal/gmscompat/GmcMediaProjectionService.java
+@@ -4,7 +4,6 @@ import android.app.Notification;
+ import android.app.Service;
+ import android.content.Intent;
+ import android.os.IBinder;
+-import android.os.RemoteException;
+ import android.util.ArrayMap;
+ import android.util.Log;
+ 
+@@ -50,13 +49,7 @@ public class GmcMediaProjectionService extends Service {
+     public int onStartCommand(Intent intent, int flags, int startId) {
+         Log.d(TAG, "onStartCommand " + intent);
+ 
+-        Notification n;
+-        try {
+-            // notification icon and text are stored in GmsCompat app
+-            n = GmsCompatApp.iGms2Gca().getMediaProjectionNotification();
+-        } catch (RemoteException e) {
+-            throw GmsCompatApp.callFailed(e);
+-        }
++        Notification n = GmsCompatApp.call(i -> i.getMediaProjectionNotification());
+ 
+         startForeground(GmsCoreConst.NOTIF_ID_MEDIA_PROJECTION_SERVICE, n);
+ 
+diff --git a/core/java/com/android/internal/gmscompat/GmcPrivSettingsHooks.java b/core/java/com/android/internal/gmscompat/GmcPrivSettingsHooks.java
+new file mode 100644
+index 0000000000..50e25c60ad
+--- /dev/null
++++ b/core/java/com/android/internal/gmscompat/GmcPrivSettingsHooks.java
+@@ -0,0 +1,182 @@
++package com.android.internal.gmscompat;
++
++import android.annotation.Nullable;
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.content.pm.StringParceledListSlice;
++import android.database.ContentObserver;
++import android.net.Uri;
++import android.os.Bundle;
++import android.os.RemoteException;
++import android.provider.DeviceConfig;
++import android.provider.Settings;
++import android.util.ArrayMap;
++import android.util.ArraySet;
++import android.util.Log;
++
++import java.util.ArrayList;
++import java.util.Set;
++
++public class GmcPrivSettingsHooks {
++    private static final String TAG = GmcPrivSettingsHooks.class.getSimpleName();
++
++    public static final String DEVICE_CONFIG_NAMESPACE = "config";
++    private static ArrayMap<String, ArrayMap<String, ArraySet<ContentObserver>>> registeredContentObservers;
++
++    public static final String ACTION_SETTING_CHANGED = GmcPrivSettingsHooks.class.getName() + ".ACTION_SETTING_CHANGED";
++    public static final String EXTRA_SETTING_NAMESPACE = "namespace";
++    public static final String EXTRA_SETTING_KEY = "key";
++
++    static void init(Context ctx) {
++        registeredContentObservers = new ArrayMap<>();
++        ChangeReceiver.register(ctx);
++    }
++
++    static class ChangeReceiver extends BroadcastReceiver {
++
++        static void register(Context ctx) {
++            var filter = new IntentFilter(ACTION_SETTING_CHANGED);
++            String perm = GmsCompatApp.SELF_PERMISSION;
++
++            var instance = new ChangeReceiver();
++            ctx.registerReceiver(instance, filter, perm, GmsHooks.getBackgroundHandler(), Context.RECEIVER_EXPORTED);
++        }
++
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            Bundle args = intent.getExtras();
++            Log.d(TAG, "onChange: " + args.toStringDeep());
++            String ns = args.getString(EXTRA_SETTING_NAMESPACE);
++            String key = args.getString(EXTRA_SETTING_KEY);
++            ContentObserver[] observers;
++            synchronized (registeredContentObservers) {
++                ArrayMap<String, ArraySet<ContentObserver>> nsObservers = registeredContentObservers.get(ns);
++                if (nsObservers == null) {
++                    return;
++                }
++                ArraySet<ContentObserver> keyObservers = nsObservers.get(key);
++                if (keyObservers == null) {
++                    return;
++                }
++                observers = keyObservers.toArray(new ContentObserver[0]);
++            }
++
++            Uri namespaceUri = Uri.parse("content://" + Settings.AUTHORITY + '/' + ns);
++            Uri uri = Settings.NameValueTable.getUriFor(namespaceUri, key);
++            Uri[] uriArray = { uri };
++            int userId = context.getUserId();
++            for (ContentObserver o : observers) {
++                try {
++                    o.getContentObserver().onChangeEtc(false, uriArray, 0, userId);
++                } catch (RemoteException e) {
++                    // local call
++                    throw new IllegalStateException(e);
++                }
++            }
++        }
++    }
++
++    public static String deviceConfigNamespace(String namespace) {
++        // last path component of DeviceConfig.CONTENT_URI
++        return DEVICE_CONFIG_NAMESPACE + ':' + namespace;
++    }
++
++    public static String getString(String ns, String key) {
++        return GmsCompatApp.call(i -> i.privSettingsGetString(ns, key));
++    }
++
++    public static boolean putString(String ns, String key, @Nullable String value) {
++        return GmsCompatApp.call(i -> i.privSettingsPutString(ns, key, value));
++    }
++
++    public static boolean setProperties(DeviceConfig.Properties props) {
++        Set<String> keyset = props.getKeyset();
++        int numKeys = keyset.size();
++        var keys = new ArrayList<String>(numKeys);
++        var values = new ArrayList<String>(numKeys);
++        String ns = deviceConfigNamespace(props.getNamespace());
++
++        for (String key : keyset) {
++            if (key == null) {
++                throw new IllegalStateException("null DeviceConfig.Properties key");
++            }
++            String value = props.getString(key, null);
++            if (value == null) {
++                // null is the default value
++                continue;
++            }
++            keys.add(key);
++            values.add(value);
++        }
++
++        return GmsCompatApp.call(i -> i.privSettingsPutStrings(ns,
++                    new StringParceledListSlice(keys),
++                    new StringParceledListSlice(values)));
++    }
++
++    public static boolean maybeRegisterObserver(Uri uri, ContentObserver observer) {
++        String s = uri.toString();
++
++        String prefix = "content://settings/";
++
++        if (!s.startsWith(prefix)) {
++            return false;
++        }
++
++        int nsStart = prefix.length();
++        int nsEnd = s.indexOf('/', nsStart);
++
++        if (nsEnd < 0 || nsStart == nsEnd) {
++            return false;
++        }
++
++        String ns = s.substring(nsStart, nsEnd);
++        String key = s.substring(nsEnd + 1);
++
++        switch (ns) {
++            // keep in sync with Settings.NameValueCache#maybeGetGmsCompatNamespace
++            case "global":
++                if (Settings.Global.isKnownKey(key)) {
++                    return false;
++                }
++                break;
++            case "secure":
++                if (Settings.Secure.isKnownKey(key)) {
++                    return false;
++                }
++                break;
++            default:
++                return false;
++        }
++
++        synchronized (registeredContentObservers) {
++            ArrayMap<String, ArraySet<ContentObserver>> nsObservers = registeredContentObservers.get(ns);
++            if (nsObservers == null) {
++                nsObservers = new ArrayMap<>();
++                registeredContentObservers.put(ns, nsObservers);
++            }
++            ArraySet<ContentObserver> keyObservers = nsObservers.get(key);
++            if (keyObservers == null) {
++                keyObservers = new ArraySet<>();
++                nsObservers.put(key, keyObservers);
++            }
++            keyObservers.add(observer);
++        }
++
++        return true;
++    }
++
++    public static void unregisterObserver(ContentObserver observer) {
++        synchronized (registeredContentObservers) {
++            for (int nsIdx = 0; nsIdx < registeredContentObservers.size(); ++nsIdx) {
++                ArrayMap<String, ArraySet<ContentObserver>> nsObservers = registeredContentObservers.valueAt(nsIdx);
++                for (int keyIdx = 0; keyIdx < nsObservers.size(); ++keyIdx) {
++                    ArraySet<ContentObserver> observers = nsObservers.valueAt(keyIdx);
++                    observers.remove(observer);
++                }
++            }
++        }
++    }
++}
+diff --git a/core/java/com/android/internal/gmscompat/GmsCompatApp.java b/core/java/com/android/internal/gmscompat/GmsCompatApp.java
+index 3407922450..2807b81ca6 100644
+--- a/core/java/com/android/internal/gmscompat/GmsCompatApp.java
++++ b/core/java/com/android/internal/gmscompat/GmsCompatApp.java
+@@ -1,314 +1,99 @@
+-/*
+- * Copyright (C) 2022 The Android Open Source Project
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *      http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+ package com.android.internal.gmscompat;
+ 
+ import android.Manifest;
+ import android.accounts.AccountManager;
+ import android.annotation.Nullable;
+ import android.app.compat.gms.GmsCompat;
+-import android.content.ContentProviderClient;
++import android.content.ComponentName;
+ import android.content.Context;
+-import android.content.pm.StringParceledListSlice;
+-import android.database.ContentObserver;
+ import android.net.ConnectivityManager;
+-import android.net.Uri;
+-import android.os.Bundle;
+-import android.os.Handler;
++import android.os.Binder;
+ import android.os.IBinder;
+-import android.os.RemoteException;
+-import android.provider.DeviceConfig;
+-import android.provider.Settings;
+-import android.util.ArraySet;
++import android.os.PowerManager;
+ import android.util.Log;
+ 
+-import com.android.internal.gmscompat.fileservice.FileProxyService;
+-
+-import java.util.ArrayList;
+-import java.util.Set;
++import com.android.internal.gmscompat.util.SynchronousServiceBinding;
+ 
+-import static com.android.internal.gmscompat.GmsHooks.inPersistentGmsCoreProcess;
++import static com.android.internal.gmscompat.GmsHooks.inMainGmsCoreProcess;
+ 
+ public final class GmsCompatApp {
+     private static final String TAG = "GmsCompat/GCA";
+     public static final String PKG_NAME = "app.grapheneos.gmscompat";
+     // permission that is held only by GmsCompatApp
+-    public static final String SIGNATURE_PROTECTED_PERMISSION = PKG_NAME + ".SIGNATURE_PROTECTED_PERMISSION";
+-
+-    @SuppressWarnings("FieldCanBeLocal")
+-    // written to fields to prevent GC from collecting them
+-    private static BinderGca2Gms binderGca2Gms;
+-    @SuppressWarnings("FieldCanBeLocal")
+-    private static FileProxyService gmsCoreFileProxyService;
++    public static final String SELF_PERMISSION = "app.grapheneos.gmscompat.permission.SELF";
++    // permission that is held only by GMS components that use GmsCompat
++    public static final String CLIENT_PERMISSION = "app.grapheneos.gmscompat.permission.CLIENT";
++    public static final String CONFIG_UPDATED_BROADCAST = PKG_NAME + ".CONFIG_UPDATED";
+ 
+-    private static IGms2Gca binderGms2Gca;
+-
+-    static GmsCompatConfig connect(Context ctx, String processName) {
+-        registeredContentObservers = new ArraySet<>();
++    @SuppressWarnings("FieldCanBeLocal") // written to field to prevent GC from collecting it
++    private static IBinder processBinder;
+ 
+-        BinderGca2Gms gca2Gms = new BinderGca2Gms();
+-        binderGca2Gms = gca2Gms;
++    private static SynchronousServiceBinding<IGms2Gca> gms2GcaServiceBinding;
+ 
+-        try {
+-            IGms2Gca iGms2Gca = IGms2Gca.Stub.asInterface(getBinder(RPC_GET_BINDER_IGms2Gca));
+-            binderGms2Gca = iGms2Gca;
+-
+-            if (GmsCompat.isGmsCore()) {
+-                FileProxyService fileProxyService = null;
+-                if (inPersistentGmsCoreProcess) {
+-                    // FileProxyService binder needs to be always available to the GmsCore clients.
+-                    // "persistent" process launches at bootup and is kept alive by the ServiceConnection
+-                    // from the GmsCompatApp, which makes it fit for the purpose of hosting the FileProxyService
+-                    fileProxyService = new FileProxyService(ctx);
+-                    gmsCoreFileProxyService = fileProxyService;
+-
+-                    Handler handler = ctx.getMainThreadHandler();
+-                    handler.postDelayed(GmsCompatApp::maybeShowContactsSyncNotification, 3000L);
+-                    handler.postDelayed(GmsCompatApp::maybeShowGmsCoreRestrictedBackgroundDataNotif, 3000L);
+-                }
+-                return iGms2Gca.connectGmsCore(processName, gca2Gms, fileProxyService);
+-            } else {
+-                return iGms2Gca.connect(ctx.getPackageName(), processName, gca2Gms);
+-            }
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
++    static class Gms2GcaBinding extends SynchronousServiceBinding<IGms2Gca> {
++        Gms2GcaBinding(Context ctx) {
++            super(ctx, componentIntent(ComponentName.createRelative(PKG_NAME,
++                    ".GmsCompatService")), "Gms2GcaBinding");
++            setPermanent();
+         }
+-    }
+ 
+-    public static IGms2Gca iGms2Gca() {
+-        return binderGms2Gca;
+-    }
+-
+-    private static volatile IClientOfGmsCore2Gca binderClientOfGmsCore2Gca;
+-
+-    public static IClientOfGmsCore2Gca iClientOfGmsCore2Gca() {
+-        IClientOfGmsCore2Gca cache = binderClientOfGmsCore2Gca;
+-        if (cache != null) {
+-            return cache;
++        @Override
++        protected IGms2Gca wrapBinder(IBinder binder) {
++            return IGms2Gca.Stub.asInterface(binder);
+         }
+-
+-        IBinder binder = getBinder(RPC_GET_BINDER_IClientOfGmsCore2Gca);
+-        IClientOfGmsCore2Gca iface = IClientOfGmsCore2Gca.Stub.asInterface(binder);
+-        // benign race, it's fine to obtain this interface more than once
+-        binderClientOfGmsCore2Gca = iface;
+-        return iface;
+     }
+ 
+-    private static final String RPC_PROVIDER_AUTHORITY = PKG_NAME + ".RpcProvider";
+-    // Keep a stable provider connection for the process lifetime so that ActivityManager propagates
+-    // this process's OOM adjustment to GmsCompat. If GmsCompat dies, this stable provider 
+-    // connection means Android will kill clients with ApplicationExitInfo.REASON_DEPENDENCY_DIED
+-    private static ContentProviderClient rpcProviderClient;
+-
+-    private static synchronized ContentProviderClient getRpcProviderClient(Context ctx,
+-            String authority) {
+-        ContentProviderClient client = rpcProviderClient;
+-        if (client == null) {
+-            client = ctx.getContentResolver().acquireContentProviderClient(authority);
+-            if (client == null) {
+-                throw new IllegalStateException("Unable to acquire " + authority);
+-            }
+-            rpcProviderClient = client;
++    static class ClientOfGmsCore2GcaBinding extends SynchronousServiceBinding<IClientOfGmsCore2Gca> {
++        ClientOfGmsCore2GcaBinding(Context ctx) {
++            super(ctx, componentIntent(ComponentName.createRelative(PKG_NAME,
++                            ".GmsClientCompatService")),
++                    "GmsClient2GcaBinding");
+         }
+-        return client;
+-    }
+ 
+-    public static final String KEY_BINDER = "binder";
+-    public static final String KEY_PKG_NAME = "pkg";
+-
+-    public static final int RPC_GET_BINDER_IGms2Gca = 0;
+-    public static final int RPC_GET_BINDER_IClientOfGmsCore2Gca = 1;
+-
+-    public static Bundle callRpcProvider(Context ctx, int method, String arg, Bundle extras) {
+-        String authority = RPC_PROVIDER_AUTHORITY;
+-        try {
+-            Bundle result = getRpcProviderClient(ctx, authority).call(Integer.toString(method),
+-                    arg, extras);
+-            // ContentResolver.call() marks provider results as defusable.
+-            Bundle.setDefusable(result, true);
+-            return result;
+-        } catch (Throwable t) {
+-            Log.e(TAG, "call to " + authority + " failed", t);
+-            if (GmsCompat.isEnabled()) {
+-                // content provider calls are infallible unless something goes very wrong, better fail fast in that case
+-                System.exit(1);
+-            }
+-            // don't crash processes that call GmsCompatApp, but don't use GmsCompat layer
+-            return null;
++        @Override
++        protected IClientOfGmsCore2Gca wrapBinder(IBinder binder) {
++            return IClientOfGmsCore2Gca.Stub.asInterface(binder);
+         }
+     }
+ 
+-    private static IBinder getBinder(int which) {
+-        Bundle bundle = callRpcProvider(GmsCompat.appContext(), which, null, null);
+-        IBinder binder = bundle.getBinder(KEY_BINDER);
+-        DeathRecipient.register(binder);
+-        return binder;
+-    }
++    static GmsCompatConfig connect(Context ctx, String processName) {
++        gms2GcaServiceBinding = new Gms2GcaBinding(ctx);
+ 
+-    static class DeathRecipient implements IBinder.DeathRecipient {
+-        private static final DeathRecipient INSTANCE = new DeathRecipient();
+-        private DeathRecipient() {}
++        GmcPrivSettingsHooks.init(ctx);
+ 
+-        static void register(IBinder b) {
+-            try {
+-                b.linkToDeath(INSTANCE, 0);
+-            } catch (RemoteException e) {
+-                // binder already died
+-                INSTANCE.binderDied();
+-            }
++        if (inMainGmsCoreProcess) {
++            Runnable r = () -> {
++                Context context = GmsCompat.appContext();
++                maybeShowContactsSyncNotification(context);
++                maybeShowGmsCorePowerExemptionNotif(context);
++                maybeShowGmsCoreRestrictedBackgroundDataNotif();
++            };
++            GmsHooks.getBackgroundHandler().postDelayed(r, 3000L);
+         }
+ 
+-        public void binderDied() {
+-            // see comment in callFailed()
+-            Log.e(TAG, PKG_NAME + " died");
+-            System.exit(1);
+-        }
++        GmcConfigChangeListener.register(ctx);
++        processBinder = new Binder();
++        return call(i -> i.connect(ctx.getPackageName(), processName, processBinder));
+     }
+ 
+-    public static RuntimeException callFailed(RemoteException e) {
+-        // running GmsCompat app process is a hard dependency of sandboxed GMS
+-        Log.e(TAG, "call failed, calling System.exit(1)", e);
+-        System.exit(1);
+-        // unreachable, needed for control flow checks by the compiler
+-        // (Java doesn't have a concept of "noreturn")
+-        return e.rethrowAsRuntimeException();
++    public static <R> R call(SynchronousServiceBinding.BinderCall<IGms2Gca, R> callFn) {
++        return gms2GcaServiceBinding.callOrExit(callFn);
+     }
+ 
+-    public static final String NS_DeviceConfig = "config";
+-
+-    public static String deviceConfigNamespace(String namespace) {
+-        // last path component of DeviceConfig.CONTENT_URI
+-        String topNs = "config";
+-        return NS_DeviceConfig + ':' + namespace;
++    public static void voidCall(SynchronousServiceBinding.VoidBinderCall<IGms2Gca> callFn) {
++        gms2GcaServiceBinding.voidCallOrExit(callFn);
+     }
+ 
+-    public static String getString(String ns, String key) {
+-        try {
+-            return iGms2Gca().privSettingsGetString(ns, key);
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
+-        }
+-    }
+-
+-    public static boolean putString(String ns, String key, @Nullable String value) {
+-        try {
+-            return iGms2Gca().privSettingsPutString(ns, key, value);
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
+-        }
+-    }
++    private static SynchronousServiceBinding<IClientOfGmsCore2Gca> clientOfGmsCore2GcaBinding;
+ 
+-    public static boolean setProperties(DeviceConfig.Properties props) {
+-        Set<String> keyset = props.getKeyset();
+-        int numKeys = keyset.size();
+-        var keys = new ArrayList<String>(numKeys);
+-        var values = new ArrayList<String>(numKeys);
+-        String ns = deviceConfigNamespace(props.getNamespace());
+-
+-        for (String key : keyset) {
+-            if (key == null) {
+-                throw new IllegalStateException("null DeviceConfig.Properties key");
+-            }
+-            String value = props.getString(key, null);
+-            if (value == null) {
+-                // null is the default value
+-                continue;
++    public static SynchronousServiceBinding<IClientOfGmsCore2Gca> iClientOfGmsCore2Gca() {
++        synchronized (GmsCompatApp.class) {
++            var cache = clientOfGmsCore2GcaBinding;
++            if (cache == null) {
++                return clientOfGmsCore2GcaBinding = new ClientOfGmsCore2GcaBinding(GmsCompat.appContext());
+             }
+-            keys.add(key);
+-            values.add(value);
+-        }
+-
+-        try {
+-            return iGms2Gca().privSettingsPutStrings(ns,
+-                    new StringParceledListSlice(keys),
+-                    new StringParceledListSlice(values));
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
+-        }
+-    }
+-
+-    private static ArraySet<ContentObserver> registeredContentObservers;
+-
+-    public static boolean registerObserver(Uri uri, ContentObserver observer) {
+-        String s = uri.toString();
+-
+-        String prefix = "content://settings/";
+-
+-        if (!s.startsWith(prefix)) {
+-            return false;
+-        }
+-
+-        int nsStart = prefix.length();
+-        int nsEnd = s.indexOf('/', nsStart);
+-
+-        if (nsEnd < 0 || nsStart == nsEnd) {
+-            return false;
+-        }
+-
+-        String ns = s.substring(nsStart, nsEnd);
+-        String key = s.substring(nsEnd + 1);
+-
+-        switch (ns) {
+-            // keep in sync with Settings.NameValueCache#maybeGetGmsCompatNamespace
+-            case "global":
+-                if (Settings.Global.isKnownKey(key)) {
+-                    return false;
+-                }
+-                break;
+-            case "secure":
+-                if (Settings.Secure.isKnownKey(key)) {
+-                    return false;
+-                }
+-                break;
+-            default:
+-                return false;
+-        }
+-
+-        android.database.IContentObserver iObserver = observer.getContentObserver();
+-
+-        try {
+-            iGms2Gca().privSettingsRegisterObserver(ns, key, iObserver);
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
+-        }
+-
+-        synchronized (registeredContentObservers) {
+-            registeredContentObservers.add(observer);
+-        }
+-
+-        return true;
+-    }
+-
+-    public static boolean unregisterObserver(ContentObserver observer) {
+-        synchronized (registeredContentObservers) {
+-            if (registeredContentObservers.contains(observer)) {
+-                registeredContentObservers.remove(observer);
+-            } else {
+-                return false;
+-            }
+-        }
+-
+-        android.database.IContentObserver iObserver = observer.getContentObserver();
+-
+-        try {
+-            iGms2Gca().privSettingsUnregisterObserver(iObserver);
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
++            return cache;
+         }
+-        return true;
+     }
+ 
+     // Bypass some background activity restrictions (e.g. background service starts) for target
+@@ -325,32 +110,23 @@ public final class GmsCompatApp {
+             Log.e(TAG, "invalid duration: " + durationMs, new Throwable());
+             return;
+         }
+-        try {
+-            GmsCompatApp.iGms2Gca().raisePackageToForeground(targetPkg, durationMs, reason, reasonCode, serviceClassName);
+-        } catch (RemoteException e) {
+-            throw callFailed(e);
+-        }
++        voidCall(i -> i.raisePackageToForeground(targetPkg, durationMs, reason, reasonCode, serviceClassName));
+     }
+ 
+-    static void maybeShowContactsSyncNotification() {
++    static void maybeShowContactsSyncNotification(Context ctx) {
+         if (GmsCompat.hasPermission(Manifest.permission.WRITE_CONTACTS)) {
+             return;
+         }
+ 
+-        Context ctx = GmsCompat.appContext();
+         var am = ctx.getSystemService(AccountManager.class);
+ 
+         am.addOnAccountsUpdatedListener(accounts -> {
+             // invoked only for Google accounts, "updateImmediately" arg ensures that it'll be called
+             // even if account is already added
+             if (accounts.length != 0) {
+-                try {
+-                    iGms2Gca().maybeShowContactsSyncNotification();
+-                } catch (RemoteException e) {
+-                    callFailed(e);
+-                }
++                voidCall(i -> i.maybeShowContactsSyncNotification());
+             }
+-        }, ctx.getMainThreadHandler(), true);
++        }, GmsHooks.getBackgroundHandler(), true);
+     }
+ 
+     static final int RESTRICTED_BACKGROUND_DATA_CHECK_INTERVAL = 3 * 60_000; // 3 minutes
+@@ -359,15 +135,21 @@ public final class GmsCompatApp {
+         Context ctx = GmsCompat.appContext();
+         var cm = ctx.getSystemService(ConnectivityManager.class);
+         if (cm.getRestrictBackgroundStatus() == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED) {
+-            try {
+-                iGms2Gca().maybeShowGmsCoreRestrictedBackgroundDataNotif();
+-            } catch (RemoteException e) {
+-                throw callFailed(e);
+-            }
++            voidCall(i -> i.maybeShowGmsCoreRestrictedBackgroundDataNotif());
+         }
+ 
+         // there's no listener API for getRestrictBackgroundStatus(), use polling with a large interval
+-        ctx.getMainThreadHandler().postDelayed(GmsCompatApp::maybeShowGmsCoreRestrictedBackgroundDataNotif, RESTRICTED_BACKGROUND_DATA_CHECK_INTERVAL);
++        GmsHooks.getBackgroundHandler().postDelayed(
++                GmsCompatApp::maybeShowGmsCoreRestrictedBackgroundDataNotif,
++                RESTRICTED_BACKGROUND_DATA_CHECK_INTERVAL);
++    }
++
++    private static void maybeShowGmsCorePowerExemptionNotif(Context ctx) {
++        var powerM = ctx.getSystemService(PowerManager.class);
++        if (powerM.isIgnoringBatteryOptimizations(ctx.getPackageName())) {
++            return;
++        }
++        voidCall(i -> i.maybeShowGmsCorePowerExemptionNotification());
+     }
+ 
+     private GmsCompatApp() {}
+diff --git a/core/java/com/android/internal/gmscompat/GmsHooks.java b/core/java/com/android/internal/gmscompat/GmsHooks.java
+index db1930715e..8c4be8b782 100644
+--- a/core/java/com/android/internal/gmscompat/GmsHooks.java
++++ b/core/java/com/android/internal/gmscompat/GmsHooks.java
+@@ -42,6 +42,8 @@ import android.net.Uri;
+ import android.os.Binder;
+ import android.os.Bundle;
+ import android.os.DeadSystemRuntimeException;
++import android.os.Handler;
++import android.os.HandlerThread;
+ import android.os.IBinder;
+ import android.os.Parcel;
+ import android.os.PowerExemptionManager;
+@@ -59,6 +61,7 @@ import android.webkit.WebView;
+ 
+ import com.android.internal.gmscompat.client.GmsCompatClientService;
+ import com.android.internal.gmscompat.client.GmsCorePersistentService;
++import com.android.internal.gmscompat.fileservice.GmsCoreFileProxyService;
+ import com.android.internal.gmscompat.flags.GmsFlag;
+ import com.android.internal.gmscompat.flags.GmsFlagOverrides;
+ import com.android.internal.gmscompat.gcarriersettings.GCarrierSettingsApp;
+@@ -70,6 +73,7 @@ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.List;
+ import java.util.UUID;
++import java.util.concurrent.Executor;
+ import java.util.function.Consumer;
+ import java.util.regex.Pattern;
+ 
+@@ -78,11 +82,9 @@ import static com.android.internal.gmscompat.GmsInfo.PACKAGE_GMS_CORE;
+ public final class GmsHooks {
+     private static final String TAG = "GmsCompat/Hooks";
+ 
++    private static volatile Object configUpdateLock;
+     private static volatile GmsCompatConfig config;
+-
+-    public static final String PERSISTENT_GmsCore_PROCESS = PACKAGE_GMS_CORE + ".persistent";
+-    public static boolean inPersistentGmsCoreProcess;
+-    public static final String UI_GmsCore_PROCESS = PACKAGE_GMS_CORE + ".ui";
++    public static boolean inMainGmsCoreProcess;
+ 
+     public static GmsCompatConfig config() {
+         // thread-safe: immutable after publication
+@@ -90,6 +92,9 @@ public final class GmsHooks {
+     }
+ 
+     public static void init(Context ctx, String packageName, String processName) {
++        backgroundThread = new HandlerThread("gmscompat");
++        backgroundThread.start();
++
+         if (!packageName.equals(processName)) {
+             // Fix RuntimeException: Using WebView from more than one process at once with the same data
+             // directory is not supported. https://crbug.com/558377
+@@ -97,7 +102,8 @@ public final class GmsHooks {
+         }
+ 
+         if (GmsCompat.isGmsCore()) {
+-            inPersistentGmsCoreProcess = processName.equals(PERSISTENT_GmsCore_PROCESS);
++            String mainProcessName = mainGmsCoreProcessName(ctx.getApplicationInfo().longVersionCode);
++            inMainGmsCoreProcess = processName.equals(mainProcessName);
+         }
+ 
+         GmsCompatLib.init(ctx, processName);
+@@ -110,47 +116,45 @@ public final class GmsHooks {
+             GCarrierSettingsApp.init();
+         }
+ 
+-        configUpdateLock = new Object();
+         tlPermissionsToSpoof = new ThreadLocal<>();
+ 
+-        // Locking is needed to prevent a race that would occur if config is updated via
+-        // BinderGca2Gms#updateConfig in the time window between BinderGms2Gca#connect and setConfig()
+-        // call below. Older GmsCompatConfig would overwrite the newer one in that case.
++        configUpdateLock = new Object();
+         synchronized (configUpdateLock) {
+-            GmsCompatConfig config = GmsCompatApp.connect(ctx, processName);
+-            setConfig(config);
++            config = GmsCompatApp.connect(ctx, processName);
+         }
+ 
+         Thread.setUncaughtExceptionPreHandler(new UncaughtExceptionPreHandler());
+ 
+-        if (inPersistentGmsCoreProcess) {
++        if (inMainGmsCoreProcess) {
+             GmsFlagOverrides.init(ctx);
+-            // The persistent GmsCore process can get frozen if it's not being used by any
++            // The main GmsCore process can get frozen if it's not being used by any
+             // non-background process. AlarmManager alarms are dropped for frozen processes,
+             // which breaks FCM notifications.
+             //
+-            // Bind to GmsCore persistent process from the never-background GmsCompat app to avoid
++            // Bind to GmsCore main process from the never-background GmsCompat app to avoid
+             // this issue.
+             //
+             // It's important to use a non-main thread for this call to prevent a deadlock since
+             // both GmsHooks.init() and GmsCorePersistentService.onCreate() run on the main thread
+-            // of the com.google.android.gms.persistent process.
++            // of the com.google.android.gms process.
+             BackgroundThread.getHandler().post(() ->
+                     GmsCompatApp.raisePackageToForeground(PackageId.GMS_CORE_NAME, 0L,
+-                    "GmsCore persistent process startup", PowerExemptionManager.REASON_OTHER,
++                    "GmsCore main process startup", PowerExemptionManager.REASON_OTHER,
+                     GmsCorePersistentService.class.getName()));
+         }
+ 
+         GmcPackageManager.init(ctx);
+     }
+ 
+-    static Object configUpdateLock;
++    public static String mainGmsCoreProcessName(long gmsCoreVersion) {
++        return gmsCoreVersion < 26_33_31_000 ?
++                PackageId.GMS_CORE_NAME + ".persistent" :
++                PackageId.GMS_CORE_NAME;
++    }
+ 
+-    static void setConfig(GmsCompatConfig c) {
+-        // configUpdateLock should never be null at this point, it's initialized before GmsCompatApp
+-        // gets a handle to BinderGca2Gms that is used for updating GmsCompatConfig
++    static void setConfig(GmsCompatConfig newConfig) {
+         synchronized (configUpdateLock) {
+-            config = c;
++            config = newConfig;
+         }
+     }
+ 
+@@ -159,6 +163,7 @@ public final class GmsHooks {
+ 
+         @Override
+         public void uncaughtException(Thread t, Throwable e) {
++            Log.e(TAG, "", e);
+             Context ctx = GmsCompat.appContext();
+ 
+             ApplicationErrorReport aer = new ApplicationErrorReport();
+@@ -175,11 +180,7 @@ public final class GmsHooks {
+             // Send the report to GmsCompatApp before GMS receives the uncaughtException() callback.
+ 
+             if (!shouldSkipException(e)) {
+-                try {
+-                    GmsCompatApp.iGms2Gca().onUncaughtException(aer);
+-                } catch (RemoteException re) {
+-                    Log.e(TAG, "", re);
+-                }
++                GmsCompatApp.voidCall(i -> i.onUncaughtException(aer));
+             }
+ 
+             if (orig != null) {
+@@ -476,11 +477,8 @@ public final class GmsHooks {
+         Context ctx = GmsCompat.appContext();
+         PendingIntent pendingIntent = PendingIntent.getActivity(ctx, 0, intent,
+                 PendingIntent.FLAG_IMMUTABLE, options);
+-        try {
+-            GmsCompatApp.iGms2Gca().startActivityFromTheBackground(ctx.getPackageName(), pendingIntent);
+-        } catch (RemoteException e) {
+-            GmsCompatApp.callFailed(e);
+-        }
++
++        GmsCompatApp.voidCall(i -> i.startActivityFromTheBackground(ctx.getPackageName(), pendingIntent));
+     }
+ 
+     // Activity#onCreate(Bundle)
+@@ -591,7 +589,7 @@ public final class GmsHooks {
+         }
+ 
+         if (GmsCompat.isGmsCore()) {
+-            if (inPersistentGmsCoreProcess) {
++            if (inMainGmsCoreProcess) {
+                 if ("phenotype.db".equals(h.getDatabaseName()) && !context.isDeviceProtectedStorage()) {
+                     if (phenotypeDb != null) {
+                         Log.w(TAG, "reassigning phenotypeDb", new Throwable());
+@@ -616,6 +614,9 @@ public final class GmsHooks {
+                 if (GmcMediaProjectionService.class.getName().equals(className)) {
+                     return new GmcMediaProjectionService();
+                 }
++                if (GmsCoreFileProxyService.class.getName().equals(className)) {
++                    return new GmsCoreFileProxyService();
++                }
+             }
+             if (GmsCompat.isGCarrierSettings()) {
+                 if (TestCarrierConfigService.class.getName().equals(className)) {
+@@ -733,8 +734,8 @@ public final class GmsHooks {
+                 // for this. However, this is set as an "API param", so it's not as backwards
+                 // compatible or guaranteed as the String property in the VerifyPhoneNumberRequest
+                 // class
+-                GmsCompatApp.iGms2Gca()
+-                        .maybeShowRcsRequirementsNotification(isTs43Verification);
++                GmsCompatApp.voidCall(i ->
++                        i.maybeShowRcsRequirementsNotification(isTs43Verification));
+             }
+         } catch (Exception e) {
+             Log.e(TAG, "onBeginGmsConstellationServiceCall: failed", e);
+@@ -763,5 +764,15 @@ public final class GmsHooks {
+         return GmcBinderDefs.maybeOverrideBinder(binder, ifaceName);
+     }
+ 
++    private static HandlerThread backgroundThread;
++
++    public static Handler getBackgroundHandler() {
++        return backgroundThread.getThreadHandler();
++    }
++
++    public static Executor getBackgroundExecutor() {
++        return backgroundThread.getThreadExecutor();
++    }
++
+     private GmsHooks() {}
+ }
+diff --git a/core/java/com/android/internal/gmscompat/IClientOfGmsCore2Gca.aidl b/core/java/com/android/internal/gmscompat/IClientOfGmsCore2Gca.aidl
+index 5cf4000640..43939acefd 100644
+--- a/core/java/com/android/internal/gmscompat/IClientOfGmsCore2Gca.aidl
++++ b/core/java/com/android/internal/gmscompat/IClientOfGmsCore2Gca.aidl
+@@ -2,14 +2,10 @@ package com.android.internal.gmscompat;
+ 
+ import android.os.BinderDef;
+ 
+-import com.android.internal.gmscompat.fileservice.IFileProxyService;
+-
+ // calls from clients of GMS Core to GmsCompatApp
+ interface IClientOfGmsCore2Gca {
+     @nullable BinderDef maybeGetBinderDef(String callerPkg, int processState, String ifaceName);
+ 
+-    IFileProxyService getGmsCoreFileProxyService();
+-
+     oneway void showMissingAppNotification(String pkgName);
+ 
+     oneway void showPlayIntegrityNotification(String pkgName, boolean isBlocked);
+diff --git a/core/java/com/android/internal/gmscompat/IGca2Gms.aidl b/core/java/com/android/internal/gmscompat/IGca2Gms.aidl
+deleted file mode 100644
+index 455a638ab6..0000000000
+--- a/core/java/com/android/internal/gmscompat/IGca2Gms.aidl
++++ /dev/null
+@@ -1,16 +0,0 @@
+-package com.android.internal.gmscompat;
+-
+-import android.app.ApplicationErrorReport;
+-import android.app.PendingIntent;
+-import android.content.Intent;
+-
+-import com.android.internal.gmscompat.GmsCompatConfig;
+-
+-// calls from GmsCompatApp to GMS components
+-interface IGca2Gms {
+-    // intentionally not oneway to simplify code in GmsCompatApp
+-    void updateConfig(in GmsCompatConfig newConfig);
+-    void invalidateConfigCaches();
+-
+-    boolean startActivityIfVisible(in Intent intent);
+-}
+diff --git a/core/java/com/android/internal/gmscompat/IGms2Gca.aidl b/core/java/com/android/internal/gmscompat/IGms2Gca.aidl
+index f44173479d..e9aa9024b2 100644
+--- a/core/java/com/android/internal/gmscompat/IGms2Gca.aidl
++++ b/core/java/com/android/internal/gmscompat/IGms2Gca.aidl
+@@ -5,17 +5,13 @@ import android.app.Notification;
+ import android.app.PendingIntent;
+ import android.content.Intent;
+ import android.content.pm.StringParceledListSlice;
+-import android.database.IContentObserver;
+ import android.os.BinderDef;
+ 
+ import com.android.internal.gmscompat.GmsCompatConfig;
+-import com.android.internal.gmscompat.IGca2Gms;
+-import com.android.internal.gmscompat.fileservice.IFileProxyService;
+ 
+ // calls from GMS components to GmsCompatApp
+ interface IGms2Gca {
+-    GmsCompatConfig connectGmsCore(String processName, IGca2Gms iGca2Gms, @nullable IFileProxyService dynamiteFileProxyService);
+-    GmsCompatConfig connect(String packageName, String processName, IGca2Gms iGca2Gms);
++    GmsCompatConfig connect(String packageName, String processName, IBinder processBinder);
+ 
+     @nullable BinderDef maybeGetBinderDef(String callerPkg, int processState, String ifaceName);
+ 
+@@ -33,17 +29,15 @@ interface IGms2Gca {
+     oneway void showMissingPostNotifsPermissionNotification(String callerPkg);
+ 
+     oneway void maybeShowContactsSyncNotification();
+-
++    oneway void maybeShowGmsCorePowerExemptionNotification();
+     oneway void maybeShowGmsCoreRestrictedBackgroundDataNotif();
+ 
+     void onUncaughtException(in ApplicationErrorReport aer);
+-    GmsCompatConfig requestConfigUpdate(String reason);
++    GmsCompatConfig getConfig();
+ 
+     @nullable String privSettingsGetString(String ns, String key);
+     boolean privSettingsPutString(String ns, String key, @nullable String value);
+     boolean privSettingsPutStrings(String ns, in StringParceledListSlice keys, in StringParceledListSlice values);
+-    void privSettingsRegisterObserver(String ns, String key, IContentObserver observer);
+-    void privSettingsUnregisterObserver(IContentObserver observer);
+ 
+     Notification getMediaProjectionNotification();
+ 
+diff --git a/core/java/com/android/internal/gmscompat/PlayStoreHooks.java b/core/java/com/android/internal/gmscompat/PlayStoreHooks.java
+index 8f083a3d9b..cd66f038d0 100644
+--- a/core/java/com/android/internal/gmscompat/PlayStoreHooks.java
++++ b/core/java/com/android/internal/gmscompat/PlayStoreHooks.java
+@@ -76,36 +76,6 @@ public final class PlayStoreHooks {
+         InternalBroadcastReceiver.register(ctx);
+     }
+ 
+-    // PackageInstaller#createSession
+-    public static void adjustSessionParams(PackageInstaller.SessionParams params) {
+-        String pkg = requireNonNull(params.appPackageName);
+-
+-        switch (pkg) {
+-            case GmsInfo.PACKAGE_GMS_CORE:
+-            case GmsInfo.PACKAGE_PLAY_STORE:
+-                String updateRequestReason = "Play Store created PackageInstaller SessionParams for " + pkg;
+-                GmsCompatConfig config;
+-                try {
+-                    config = GmsCompatApp.iGms2Gca().requestConfigUpdate(updateRequestReason);
+-                } catch (RemoteException e) {
+-                    throw GmsCompatApp.callFailed(e);
+-                }
+-                if (GmsHooks.config().version != config.version) {
+-                    GmsHooks.setConfig(config);
+-                }
+-                break;
+-        }
+-
+-        switch (pkg) {
+-            case GmsInfo.PACKAGE_GMS_CORE:
+-                params.maxAllowedVersion = GmsHooks.config().maxGmsCoreVersion;
+-                break;
+-            case GmsInfo.PACKAGE_PLAY_STORE:
+-                params.maxAllowedVersion = GmsHooks.config().maxPlayStoreVersion;
+-                break;
+-        }
+-    }
+-
+     // PackageInstaller.Session#commit(IntentSender)
+     public static IntentSender wrapCommitStatusReceiver(PackageInstaller.Session session, IntentSender statusReceiver) {
+         return PackageInstallerStatusForwarder.register((intent, extras) -> sendIntent(intent, statusReceiver))
+@@ -113,12 +83,7 @@ public final class PlayStoreHooks {
+     }
+ 
+     public static void onActivityResumed(Activity activity) {
+-        Intent pendingActionIntent;
+-        try {
+-            pendingActionIntent = GmsCompatApp.iGms2Gca().maybeGetPlayStorePendingUserActionIntent();
+-        } catch (RemoteException e) {
+-            throw GmsCompatApp.callFailed(e);
+-        }
++        Intent pendingActionIntent = GmsCompatApp.call(i -> i.maybeGetPlayStorePendingUserActionIntent());
+         if (pendingActionIntent != null) {
+             activity.startActivity(pendingActionIntent);
+         }
+@@ -170,11 +135,8 @@ public final class PlayStoreHooks {
+                     }
+                 }
+ 
+-                try {
+-                    GmsCompatApp.iGms2Gca().onPlayStorePendingUserAction(confirmationIntent, packageName);
+-                } catch (RemoteException e) {
+-                    GmsCompatApp.callFailed(e);
+-                }
++                String packageName_ = packageName;
++                GmsCompatApp.voidCall(i -> i.onPlayStorePendingUserAction(confirmationIntent, packageName_));
+ 
+                 // confirmationIntent has a PendingIntent to this instance, don't unregister yet
+                 return;
+@@ -384,11 +346,7 @@ public final class PlayStoreHooks {
+             boolean hasObbAccess = ps.hasFlag(GosPackageStateFlag.ALLOW_ACCESS_TO_OBB_DIRECTORY);
+ 
+             if (!hasObbAccess) {
+-                try {
+-                    GmsCompatApp.iGms2Gca().showPlayStoreMissingObbPermissionNotification();
+-                } catch (RemoteException e) {
+-                    GmsCompatApp.callFailed(e);
+-                }
++                GmsCompatApp.voidCall(i -> i.showPlayStoreMissingObbPermissionNotification());
+             }
+         }
+     }
+diff --git a/core/java/com/android/internal/gmscompat/dynamite/GmsDynamiteClientHooks.java b/core/java/com/android/internal/gmscompat/dynamite/GmsDynamiteClientHooks.java
+index f87224c34e..4e3d2981da 100644
+--- a/core/java/com/android/internal/gmscompat/dynamite/GmsDynamiteClientHooks.java
++++ b/core/java/com/android/internal/gmscompat/dynamite/GmsDynamiteClientHooks.java
+@@ -15,7 +15,6 @@ import dalvik.system.DelegateLastClassLoader;
+ 
+ public final class GmsDynamiteClientHooks {
+     static final String TAG = "GmsCompat/DynamiteClient";
+-    private static final boolean DEBUG = false;
+ 
+     // written last in the init sequence, "volatile" to publish all the preceding writes
+     private static volatile boolean enabled;
+diff --git a/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileProxyService.java b/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileProxyService.java
+new file mode 100644
+index 0000000000..615d5aab3c
+--- /dev/null
++++ b/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileProxyService.java
+@@ -0,0 +1,20 @@
++package com.android.internal.gmscompat.fileservice;
++
++import android.app.Service;
++import android.content.Intent;
++import android.os.IBinder;
++
++public class GmsCoreFileProxyService extends Service {
++
++    private FileProxyService service;
++
++    @Override
++    public void onCreate() {
++        service = new FileProxyService(getApplicationContext());
++    }
++
++    @Override
++    public IBinder onBind(Intent intent) {
++        return service.asBinder();
++    }
++}
+diff --git a/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileServerClientHooks.java b/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileServerClientHooks.java
+index 44ee34a96d..9eca631da3 100644
+--- a/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileServerClientHooks.java
++++ b/core/java/com/android/internal/gmscompat/fileservice/GmsCoreFileServerClientHooks.java
+@@ -3,6 +3,7 @@ package com.android.internal.gmscompat.fileservice;
+ import android.annotation.Nullable;
+ import android.app.compat.gms.GmsCompat;
+ import android.content.Context;
++import android.content.Intent;
+ import android.content.pm.ApplicationInfo;
+ import android.content.pm.PackageManager;
+ import android.ext.PackageId;
+@@ -12,12 +13,10 @@ import android.os.RemoteException;
+ import android.util.ArrayMap;
+ import android.util.Log;
+ 
+-import com.android.internal.annotations.GuardedBy;
+-import com.android.internal.gmscompat.GmsCompatApp;
++import com.android.internal.gmscompat.util.SynchronousServiceBinding;
+ 
+ import java.io.File;
+ import java.io.FileDescriptor;
+-import java.util.ArrayList;
+ 
+ import libcore.io.IoBridge;
+ import libcore.io.IoUtils;
+@@ -27,20 +26,20 @@ import static android.system.OsConstants.O_RDONLY;
+ 
+ public class GmsCoreFileServerClientHooks {
+     private static final String TAG = "GmsCoreFileServerClientHooks";
+-    private static final boolean DEBUG = false;
++    private static boolean DEBUG;
+ 
+     private static boolean isEnabled;
+     private static String gmsCoreDeDataPrefix;
+     private static String gmsCoreCeDataPrefix;
+-    private static volatile IFileProxyService fileProxyService;
++    private static FileProxyServiceBinding fileProxyServiceBinding;
+     private static ArrayMap<String, ParcelFileDescriptor> pfdCache;
+-    private static ArrayList<ParcelFileDescriptor> pastCachedFds;
+ 
+     public static boolean isEnabled() {
+         return isEnabled;
+     }
+ 
+     public static void init() {
++        DEBUG = Log.isLoggable(TAG, Log.VERBOSE);
+         Context context = GmsCompat.appContext();
+         ApplicationInfo gmsCoreAppInfo;
+         try {
+@@ -52,7 +51,11 @@ public class GmsCoreFileServerClientHooks {
+         gmsCoreDeDataPrefix = gmsCoreAppInfo.deviceProtectedDataDir + "/";
+         gmsCoreCeDataPrefix = gmsCoreAppInfo.credentialProtectedDataDir + "/";
+         pfdCache = new ArrayMap<>(20);
+-        pastCachedFds = new ArrayList<>();
++
++        var fileProxyServiceIntent = new Intent();
++        fileProxyServiceIntent.setClassName(PackageId.GMS_CORE_NAME,
++            GmsCoreFileProxyService.class.getName());
++        fileProxyServiceBinding = new FileProxyServiceBinding(context, fileProxyServiceIntent);
+ 
+         File.lastModifiedHook = GmsCoreFileServerClientHooks::getFileLastModified;
+         IoBridge.openFdInterceptor = new IoBridge.OpenFdInterceptor() {
+@@ -123,25 +126,28 @@ public class GmsCoreFileServerClientHooks {
+         if (DEBUG) {
+             Log.d(TAG, "cached path " + path, new Throwable());
+         }
+-        try {
+-            ArrayMap<String, ParcelFileDescriptor> cache = pfdCache;
+-            // this lock isn't contended, favor simplicity, not making the critical section shorter
+-            synchronized (cache) {
+-                ParcelFileDescriptor pfd = cache.get(path);
++
++        ArrayMap<String, ParcelFileDescriptor> cache = pfdCache;
++        // this lock isn't contended, favor simplicity, not making the critical section shorter
++        synchronized (cache) {
++            ParcelFileDescriptor cachedPfd = cache.get(path);
++            if (cachedPfd == null) {
++                ParcelFileDescriptor pfd;
++                try {
++                    pfd = fileProxyServiceBinding.call(service -> service.openFile(path));
++                } catch (RemoteException e) {
++                    // FileProxyService never forwards exceptions to minimize the information leaks,
++                    // this is a very rare "binder died" exception
++                    throw e.rethrowAsRuntimeException();
++                }
+                 if (pfd == null) {
+-                    pfd = getFileProxyService().openFile(path);
+-                    if (pfd == null) {
+-                        return null;
+-                    }
+-                    // ParcelFileDescriptor owns the underlying file descriptor
+-                    cache.put(path, pfd);
++                    return null;
+                 }
+-                return pfd.getFileDescriptor();
++                // ParcelFileDescriptor owns the underlying file descriptor
++                cache.put(path, pfd);
++                cachedPfd = pfd;
+             }
+-        } catch (RemoteException e) {
+-            // FileProxyService never forwards exceptions to minimize the information leaks,
+-            // this is a very rare "binder died" exception
+-            throw e.rethrowAsRuntimeException();
++            return cachedPfd.getFileDescriptor();
+         }
+     }
+ 
+@@ -167,11 +173,7 @@ public class GmsCoreFileServerClientHooks {
+             Log.d(TAG, "fresh path " + path, new Throwable());
+         }
+         try {
+-            IFileProxyService service;
+-            synchronized (pfdCache) {
+-                service = getFileProxyService();
+-            }
+-            return service.openFile(path);
++            return fileProxyServiceBinding.call(service -> service.openFile(path));
+         } catch (RemoteException e) {
+             // FileProxyService never forwards exceptions to minimize the information leaks,
+             // this is a very rare "binder died" exception
+@@ -179,35 +181,15 @@ public class GmsCoreFileServerClientHooks {
+         }
+     }
+ 
+-    @GuardedBy("pfdCache")
+-    private static IFileProxyService getFileProxyService() {
+-        IFileProxyService cache = fileProxyService;
+-        if (cache != null) {
+-            return cache;
++    static class FileProxyServiceBinding extends SynchronousServiceBinding<IFileProxyService> {
++
++        public FileProxyServiceBinding(Context ctx, Intent intent) {
++            super(ctx, intent, "GmcFileProxyServiceBinding");
+         }
+-        try {
+-            IFileProxyService service = GmsCompatApp.iClientOfGmsCore2Gca().getGmsCoreFileProxyService();
+-            fileProxyService = service;
+-            IBinder.DeathRecipient serviceDeathCallback = () -> {
+-                fileProxyService = null;
+-                Log.d(TAG, "FileProxyService died");
+-                synchronized (pfdCache) {
+-                    // It's not safe to close cached file descriptors, they might still be in use
+-                    // at this point. Simply clearing the cache would make cached ParcelFileDescriptors
+-                    // collectable by GC, which would close the underlying file descriptors via
+-                    // ParcelFileDescriptor#finalize()
+-                    //
+-                    // pastCachedFds list is effectively a file descriptor leak, but it's small and
+-                    // rare. File descriptor count limit (RLIMIT_NOFILE) is set to 32768 as of Android 15.
+-                    pastCachedFds.addAll(pfdCache.values());
+-                    pfdCache.clear();
+-                }
+-            };
+-            service.asBinder().linkToDeath(serviceDeathCallback, 0);
+-            return service;
+-        } catch (RemoteException e) {
+-            Log.e(TAG, "unable to obtain FileProxyService", e);
+-            throw e.rethrowAsRuntimeException();
++
++        @Override
++        protected IFileProxyService wrapBinder(IBinder binder) {
++            return IFileProxyService.Stub.asInterface(binder);
+         }
+     }
+ }
+diff --git a/core/java/com/android/internal/gmscompat/sysservice/GmcPackageManager.java b/core/java/com/android/internal/gmscompat/sysservice/GmcPackageManager.java
+index 3fe16a1a21..61cea5e16c 100644
+--- a/core/java/com/android/internal/gmscompat/sysservice/GmcPackageManager.java
++++ b/core/java/com/android/internal/gmscompat/sysservice/GmcPackageManager.java
+@@ -587,7 +587,7 @@ public class GmcPackageManager extends ApplicationPackageManager {
+         // Don't repeat setComponentEnabledSettings() in all processes
+         boolean shouldUpdate;
+         if (GmsCompat.isGmsCore()) {
+-            shouldUpdate = GmsHooks.inPersistentGmsCoreProcess;
++            shouldUpdate = GmsHooks.inMainGmsCoreProcess;
+         } else if (GmsCompat.isPlayStore()) {
+             shouldUpdate = GmsInfo.PACKAGE_PLAY_STORE.equals(Application.getProcessName());
+         } else {
+diff --git a/core/java/com/android/internal/gmscompat/util/GmcActivityUtils.java b/core/java/com/android/internal/gmscompat/util/GmcActivityUtils.java
+index 4e707f5c6a..01d625ce97 100644
+--- a/core/java/com/android/internal/gmscompat/util/GmcActivityUtils.java
++++ b/core/java/com/android/internal/gmscompat/util/GmcActivityUtils.java
+@@ -97,11 +97,7 @@ public class GmcActivityUtils implements Application.ActivityLifecycleCallbacks
+                 }
+             }
+         } else {
+-            try {
+-                GmsCompatApp.iGms2Gca().showGmsCoreMissingPermissionForNearbyShareNotification();
+-            } catch (RemoteException e) {
+-                GmsCompatApp.callFailed(e);
+-            }
++            GmsCompatApp.voidCall(i -> i.showGmsCoreMissingPermissionForNearbyShareNotification());
+         }
+     }
+ 
+@@ -123,11 +119,8 @@ public class GmcActivityUtils implements Application.ActivityLifecycleCallbacks
+ 
+         if (BluetoothAdapter.ACTION_REQUEST_ENABLE.equals(intent.getAction())) {
+             if (GmsCompat.isGmsCore() && !GmsCompat.hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
+-                try {
+-                    GmsCompatApp.iGms2Gca().showGmsCoreMissingNearbyDevicesPermissionGeneric();
+-                } catch (RemoteException e) {
+-                    GmsCompatApp.callFailed(e);
+-                }
++                GmsCompatApp.voidCall(i ->
++                        i.showGmsCoreMissingNearbyDevicesPermissionGeneric());
+                 return null;
+             }
+         }
+diff --git a/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java b/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java
+new file mode 100644
+index 0000000000..0373b4e6ec
+--- /dev/null
++++ b/core/java/com/android/internal/gmscompat/util/SynchronousServiceBinding.java
+@@ -0,0 +1,374 @@
++package com.android.internal.gmscompat.util;
++
++import android.annotation.ElapsedRealtimeLong;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.ServiceConnection;
++import android.os.Handler;
++import android.os.HandlerThread;
++import android.os.IBinder;
++import android.os.Process;
++import android.os.RemoteException;
++import android.os.SystemClock;
++import android.util.Log;
++
++import com.android.internal.annotations.GuardedBy;
++
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicInteger;
++import java.util.concurrent.atomic.AtomicLong;
++import java.util.concurrent.locks.ReentrantLock;
++
++/**
++ * Lazily binds to a service and makes blocking calls to it.
++ * <p>
++ * Binding happens on first use and after the binding was dropped. It blocks the caller,
++ * and other callers of the same instance, for up to three attempts of 10 s each. If all of
++ * them fail, the process is killed.
++ * <p>
++ * Only a running call keeps the binding alive, unless the binding is marked as
++ * {@link #setPermanent() permanent}. After one to two
++ * {@link #setIdlenessCheckInterval idleness check intervals} without calls, the service is unbound,
++ * and anything obtained from the service, such as sub-interfaces or registered callbacks, may stop
++ * working.
++ */
++public abstract class SynchronousServiceBinding<T> implements IBinder.DeathRecipient {
++    private static final int MAX_CONNECTION_ATTEMPTS = 3;
++
++    private final String logTag;
++    private static Handler serviceConnectionHandler;
++
++    private final Context context;
++    private final Intent serviceIntent;
++    private boolean isPermanent;
++    private final ReentrantLock serviceLock = new ReentrantLock();
++    @GuardedBy("serviceLock")
++    private ServiceConnectionImpl cachedConnection;
++    private volatile int idlenessCheckIntervalMs = 30_000;
++    @GuardedBy("serviceLock")
++    private boolean isIdleConnectionReleaseScheduled;
++
++    /**
++     * Context must live as long as the process, i.e. it should be an application context or
++     * the root ContextImpl.
++     */
++    public SynchronousServiceBinding(Context context, Intent serviceIntent, String logTag) {
++        this.context = context;
++        this.serviceIntent = serviceIntent;
++        this.logTag = logTag;
++    }
++
++    /**
++     * Never release the binding after it's established and kill our process if the service connection
++     * fails.
++     */
++    protected final void setPermanent() {
++        isPermanent = true;
++    }
++
++    static class RefCountedService<T> {
++        final IBinder binder;
++        final T service;
++        private final AtomicInteger refCount = new AtomicInteger();
++        @ElapsedRealtimeLong private volatile long lastUseTimestamp;
++
++        RefCountedService(IBinder binder, T service) {
++            this.binder = binder;
++            this.service = service;
++        }
++
++        void acquire() {
++            if (refCount.getAndIncrement() < 0) {
++                throw new IllegalStateException("invalid service refcount");
++            }
++        }
++
++        void release() {
++            lastUseTimestamp = SystemClock.elapsedRealtime();
++            refCount.getAndDecrement();
++        }
++
++        boolean isIdle(int idleTimeoutMs) {
++            return refCount.get() == 0 && SystemClock.elapsedRealtime() - lastUseTimestamp > idleTimeoutMs;
++        }
++    }
++
++    public static Intent componentIntent(ComponentName cn) {
++        var i = new Intent();
++        i.setComponent(cn);
++        return i;
++    }
++
++    public void setIdlenessCheckInterval(int intervalMs) {
++        if (intervalMs <= 0) {
++            throw new IllegalArgumentException();
++        }
++        idlenessCheckIntervalMs = intervalMs;
++    }
++
++    public interface BinderCall<T, R> {
++        R call(T service) throws RemoteException;
++    }
++
++    public interface VoidBinderCall<T> {
++        void call(T service) throws RemoteException;
++    }
++
++    /**
++     * This method has to be idempotent and shouldn't perform any IPC.
++     */
++    protected abstract T wrapBinder(IBinder binder);
++
++    public <R> R call(BinderCall<T, R> callFn) throws RemoteException {
++        RefCountedService<T> rcService = acquireService();
++        try {
++            return callFn.call(rcService.service);
++        } finally {
++            rcService.release();
++        }
++    }
++
++    public <R> R callOrExit(BinderCall<T, R> callFn) {
++        try {
++            return call(callFn);
++        } catch (RemoteException e) {
++            throw exit(e);
++        }
++    }
++
++    public void voidCallOrExit(VoidBinderCall<T> callFn) {
++        try {
++            voidCall(callFn);
++        } catch (RemoteException e) {
++            throw exit(e);
++        }
++    }
++
++    public void voidCall(VoidBinderCall<T> callFn) throws RemoteException {
++        RefCountedService<T> rcService = acquireService();
++        try {
++            callFn.call(rcService.service);
++        } finally {
++            rcService.release();
++        }
++    }
++
++    private RefCountedService<T> acquireService() {
++        serviceLock.lock();
++        try {
++            if (cachedConnection != null) {
++                if (!cachedConnection.isUnbound) {
++                    RefCountedService<T> service = cachedConnection.service;
++                    if (service != null && (isPermanent || service.binder.isBinderAlive())) {
++                        service.acquire();
++                        return service;
++                    }
++                    cachedConnection.unbind();
++                }
++                cachedConnection = null;
++            }
++
++            synchronized (SynchronousServiceBinding.class) {
++                if (serviceConnectionHandler == null) {
++                    // using a separate callback thread is important to avoid deadlocks, e.g. when
++                    // called on the main thread
++                    var ht = new HandlerThread("ServiceConnection-callbacks");
++                    ht.start();
++                    serviceConnectionHandler = ht.getThreadHandler();
++                } else {
++                    if (serviceConnectionHandler.getLooper().isCurrentThread()) {
++                        throw new IllegalStateException("acquireService called on serviceConnectionThread");
++                    }
++                }
++            }
++
++            for (int i = 0; i < MAX_CONNECTION_ATTEMPTS; ++i) {
++                var connection = new ServiceConnectionImpl();
++
++                @Context.BindServiceFlagsBits int bindFlags = Context.BIND_AUTO_CREATE;
++                if (isPermanent) {
++                    bindFlags |= Context.BIND_ABOVE_CLIENT;
++                }
++                boolean bound = context.bindServiceAsUser(serviceIntent, connection, bindFlags,
++                        serviceConnectionHandler, context.getUser());
++                if (!bound) {
++                    Log.e(logTag, "bindService() failed");
++                    context.unbindService(connection);
++                    continue;
++                }
++
++                boolean interrupted = false;
++                boolean retry = false;
++                long start = SystemClock.uptimeMillis(); // latch.await() doesn't count time in deep sleep
++                for (;;) {
++                    try {
++                        long timeoutMs = 10_000L - (SystemClock.uptimeMillis() - start);
++                        if (timeoutMs < 0 || !connection.initialServiceValueLatch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
++                            Log.e(logTag, "connection.initialServiceValueLatch timed out");
++                            connection.unbind();
++                            retry = true;
++                            break;
++                        }
++                        break;
++                    } catch (InterruptedException e) {
++                        Log.w(logTag, "interrupted while awaiting initialServiceValueLatch", e);
++                        interrupted = true;
++                    }
++                }
++                if (interrupted) {
++                    Thread.currentThread().interrupt();
++                }
++                if (retry) {
++                    continue;
++                }
++
++                RefCountedService<T> service = connection.service;
++                if (service == null) {
++                    Log.i(logTag, "connection.service is null");
++                    continue;
++                }
++
++                if (isPermanent) {
++                    try {
++                        service.binder.linkToDeath(this, 0);
++                    } catch (RemoteException e) {
++                        throw exit("service has already died");
++                    }
++                }
++
++                cachedConnection = connection;
++                service.acquire();
++                scheduleIdleConnectionRelease();
++                return service;
++            }
++        } finally {
++            serviceLock.unlock();
++        }
++        throw exit("acquireService() failed");
++    }
++
++    @Override
++    public void binderDied() {
++        throw exit("service has died");
++    }
++
++    @GuardedBy("serviceLock")
++    private void scheduleIdleConnectionRelease() {
++        if (!isPermanent && !isIdleConnectionReleaseScheduled) {
++            serviceConnectionHandler.postDelayed(this::releaseConnectionIfIdle, idlenessCheckIntervalMs);
++            isIdleConnectionReleaseScheduled = true;
++        }
++    }
++
++    private void releaseConnectionIfIdle() {
++        if (!serviceLock.tryLock()) {
++            // avoid deadlock with acquireService()
++            serviceConnectionHandler.postDelayed(this::releaseConnectionIfIdle, idlenessCheckIntervalMs);
++            return;
++        }
++        try {
++            isIdleConnectionReleaseScheduled = false;
++            ServiceConnectionImpl conn = cachedConnection;
++            if (conn == null) {
++                return;
++            }
++            RefCountedService<T> service = conn.service;
++            if (service == null) {
++                cachedConnection = null;
++                return;
++            }
++
++            if (service.isIdle(idlenessCheckIntervalMs)) {
++                Log.d(logTag, "connection is idle, unbinding");
++                conn.unbind();
++                cachedConnection = null;
++            } else {
++                scheduleIdleConnectionRelease();
++            }
++        } finally {
++            serviceLock.unlock();
++        }
++    }
++
++    private RuntimeException exit(String msg) {
++        return exit(new RuntimeException(msg));
++    }
++
++    private RuntimeException exit(Exception e) {
++        Log.e(logTag, "", e);
++        Process.killProcess(Process.myPid());
++        for (;;) {
++            SystemClock.sleep(60_000);
++        }
++    }
++
++    public class ServiceConnectionImpl implements ServiceConnection {
++        final CountDownLatch initialServiceValueLatch = new CountDownLatch(1);
++
++        volatile RefCountedService<T> service;
++        volatile boolean isUnbound;
++
++        private static final AtomicLong idSource = new AtomicLong();
++        final String connLogTag = logTag + ':' + idSource.getAndIncrement();
++
++        ServiceConnectionImpl() {
++            Log.d(connLogTag, "created ServiceConnectionImpl");
++        }
++
++        @Override
++        public void onServiceConnected(ComponentName name, IBinder binder) {
++            Log.d(connLogTag, "onServiceConnected");
++
++            synchronized (this) {
++                if (isUnbound) {
++                    return;
++                }
++                service = new RefCountedService<>(binder, wrapBinder(binder));
++            }
++            initialServiceValueLatch.countDown();
++        }
++
++        void unbind() {
++            synchronized (this) {
++                if (isUnbound) {
++                    return;
++                }
++                Log.i(connLogTag, "unbinding ServiceConnectionImpl");
++                service = null;
++                // no-op if count-down already happened
++                initialServiceValueLatch.countDown();
++                isUnbound = true;
++                context.unbindService(this);
++            }
++        }
++
++        private void exitIfPermanent() {
++            if (isPermanent && initialServiceValueLatch.getCount() == 0) {
++                throw exit(logTag + " connection failed");
++            }
++        }
++
++        @Override
++        public void onServiceDisconnected(ComponentName name) {
++            Log.i(connLogTag, "onServiceDisconnected");
++            exitIfPermanent();
++            unbind();
++        }
++
++        @Override
++        public void onBindingDied(ComponentName name) {
++            Log.i(connLogTag, "onBindingDied");
++            exitIfPermanent();
++            unbind();
++        }
++
++        @Override
++        public void onNullBinding(ComponentName name) {
++            Log.i(connLogTag, "onNullBinding");
++            exitIfPermanent();
++            unbind();
++        }
++    }
++}
+diff --git a/services/core/java/com/android/server/pm/PackageInstallerSession.java b/services/core/java/com/android/server/pm/PackageInstallerSession.java
+index f373dd68fb..94d5fb38c0 100644
+--- a/services/core/java/com/android/server/pm/PackageInstallerSession.java
++++ b/services/core/java/com/android/server/pm/PackageInstallerSession.java
+@@ -5022,20 +5022,16 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
+                     case PackageId.GMS_CORE_NAME:
+                     case PackageId.PLAY_STORE_NAME: {
+                         if (isInstallerPlayStore) {
+-                            if (mVersionCode <= params.maxAllowedVersion) {
+-                                break;
+-                            }
+-
+                             // lock that is held at this point is per-session lock, call into
+                             // PackageManager is safe
+                             AndroidPackage pkg = pmi.getPackage(mPackageName);
+                             if (pkg != null && pkg.getLongVersionCode() == mVersionCode) {
++                                // allow installation of APK splits
+                                 break;
+                             }
+ 
+                             String msg = "Installation of " + mPackageName + " version " + mVersionCode
+-                                        + " is blocked to prevent breaking gmscompat. " +
+-                                        "Max allowed version is " + params.maxAllowedVersion;
++                                        + " is blocked to prevent breaking gmscompat.";
+                             throw new PackageManagerException(errorCode, msg);
+                         }
+ 
+diff --git a/services/core/java/com/android/server/pm/ext/AndroidAutoHooks.java b/services/core/java/com/android/server/pm/ext/AndroidAutoHooks.java
+index 5162c539cc..14329ab605 100644
+--- a/services/core/java/com/android/server/pm/ext/AndroidAutoHooks.java
++++ b/services/core/java/com/android/server/pm/ext/AndroidAutoHooks.java
+@@ -12,7 +12,7 @@ import com.android.server.pm.pkg.AndroidPackage;
+ 
+ import java.util.List;
+ 
+-public class AndroidAutoHooks extends PackageHooks {
++public class AndroidAutoHooks extends GmsCompatPackageHooks {
+     private static final String TAG = "AndroidAutoHooks";
+ 
+     static class ParsingHooks extends GmsCompatPkgParsingHooks {
+@@ -60,6 +60,11 @@ public class AndroidAutoHooks extends PackageHooks {
+ 
+     @Override
+     public int overridePermissionState(String permission, int userId) {
++        int superRes = super.overridePermissionState(permission, userId);
++        if (superRes != NO_PERMISSION_OVERRIDE) {
++            return superRes;
++        }
++
+         int flag;
+         Integer flag2 = null;
+ 
+diff --git a/services/core/java/com/android/server/pm/ext/GCarrierSettingsHooks.java b/services/core/java/com/android/server/pm/ext/GCarrierSettingsHooks.java
+index cb2c0777f0..0be55e22d5 100644
+--- a/services/core/java/com/android/server/pm/ext/GCarrierSettingsHooks.java
++++ b/services/core/java/com/android/server/pm/ext/GCarrierSettingsHooks.java
+@@ -12,7 +12,7 @@ import com.android.server.pm.pkg.PackageStateInternal;
+ import java.util.Collections;
+ import java.util.List;
+ 
+-class GCarrierSettingsHooks extends PackageHooks {
++class GCarrierSettingsHooks extends GmsCompatPackageHooks {
+ 
+     static class ParsingHooks extends GmsCompatPkgParsingHooks {
+ 
+diff --git a/services/core/java/com/android/server/pm/ext/GmsCompatPackageHooks.java b/services/core/java/com/android/server/pm/ext/GmsCompatPackageHooks.java
+new file mode 100644
+index 0000000000..15941d63b1
+--- /dev/null
++++ b/services/core/java/com/android/server/pm/ext/GmsCompatPackageHooks.java
+@@ -0,0 +1,31 @@
++package com.android.server.pm.ext;
++
++import android.annotation.Nullable;
++import android.app.compat.gms.GmsCompat;
++import android.ext.PackageId;
++
++import com.android.internal.gmscompat.GmsCompatApp;
++
++public class GmsCompatPackageHooks extends PackageHooks {
++
++    @Nullable
++    public static GmsCompatPackageHooks maybeGet(int packageId) {
++        if (!GmsCompat.isEnabledFor(packageId, false)) {
++            return null;
++        }
++        return switch (packageId) {
++            case PackageId.GMS_CORE -> new GmsCoreHooks();
++            case PackageId.G_CARRIER_SETTINGS -> new GCarrierSettingsHooks();
++            case PackageId.ANDROID_AUTO -> new AndroidAutoHooks();
++            default -> new GmsCompatPackageHooks();
++        };
++    }
++
++    @Override
++    public int overridePermissionState(String permission, int userId) {
++        if (permission.equals(GmsCompatApp.CLIENT_PERMISSION)) {
++            return PERMISSION_OVERRIDE_GRANT;
++        }
++        return NO_PERMISSION_OVERRIDE;
++    }
++}
+diff --git a/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java b/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java
+index 756110b132..0db3f81389 100644
+--- a/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java
++++ b/services/core/java/com/android/server/pm/ext/GmsCompatPkgParsingHooks.java
+@@ -44,7 +44,7 @@ public class GmsCompatPkgParsingHooks extends PackageParsingHooks {
+         }
+ 
+         ParsedServiceImpl s = createService(pkg, GmsCompatClientService.class.getName());
+-        s.setPermission(GmsCompatApp.SIGNATURE_PROTECTED_PERMISSION);
++        s.setPermission(GmsCompatApp.SELF_PERMISSION);
+ 
+         String pkgName = pkg.getPackageName();
+         if (GmsCompat.canBeEnabledFor(pkgName)) {
+@@ -62,7 +62,9 @@ public class GmsCompatPkgParsingHooks extends PackageParsingHooks {
+     @CallSuper
+     @Override
+     public List<ParsedUsesPermissionImpl> addUsesPermissions() {
+-        return createUsesPerms(Manifest.permission.FOREGROUND_SERVICE_SPECIAL_USE);
++        return createUsesPerms(Manifest.permission.FOREGROUND_SERVICE_SPECIAL_USE
++                , GmsCompatApp.CLIENT_PERMISSION
++        );
+     }
+ 
+     @CallSuper
+diff --git a/services/core/java/com/android/server/pm/ext/GmsCoreHooks.java b/services/core/java/com/android/server/pm/ext/GmsCoreHooks.java
+index 5abcf28bc2..4e68c3deeb 100644
+--- a/services/core/java/com/android/server/pm/ext/GmsCoreHooks.java
++++ b/services/core/java/com/android/server/pm/ext/GmsCoreHooks.java
+@@ -13,6 +13,7 @@ import com.android.internal.gmscompat.GmcMediaProjectionService;
+ import com.android.internal.gmscompat.GmsCompatApp;
+ import com.android.internal.gmscompat.GmsHooks;
+ import com.android.internal.gmscompat.client.GmsCorePersistentService;
++import com.android.internal.gmscompat.fileservice.GmsCoreFileProxyService;
+ import com.android.internal.pm.pkg.component.ParsedIntentInfo;
+ import com.android.internal.pm.pkg.component.ParsedPermission;
+ import com.android.internal.pm.pkg.component.ParsedService;
+@@ -23,10 +24,15 @@ import com.android.server.LocalServices;
+ 
+ import java.util.List;
+ 
+-class GmsCoreHooks extends PackageHooks {
++class GmsCoreHooks extends GmsCompatPackageHooks {
+ 
+     @Override
+     public int overridePermissionState(String permission, int userId) {
++        int superRes = super.overridePermissionState(permission, userId);
++        if (superRes != NO_PERMISSION_OVERRIDE) {
++            return superRes;
++        }
++
+         if (android.os.Flags.isDevBuild()) {
+             if (SystemProperties.getBoolean("sys.gmscore_grant." + permission, false)) {
+                 return PERMISSION_OVERRIDE_GRANT;
+@@ -107,17 +113,23 @@ class GmsCoreHooks extends PackageHooks {
+ 
+         @Override
+         public List<ParsedService> addServices(ParsingPackage pkg) {
++            String mainProcessName = GmsHooks.mainGmsCoreProcessName(pkg.getLongVersionCode());
+             ParsedServiceImpl mp = createService(pkg, GmcMediaProjectionService.class.getName());
+-            mp.setProcessName(GmsHooks.PERSISTENT_GmsCore_PROCESS);
++            mp.setProcessName(mainProcessName);
+             mp.setForegroundServiceType(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+             mp.setExported(false);
+ 
+             ParsedServiceImpl persistent = createService(pkg, GmsCorePersistentService.class.getName());
+             persistent.setDirectBootAware(true);
+-            persistent.setProcessName(GmsHooks.PERSISTENT_GmsCore_PROCESS);
+-            persistent.setPermission(GmsCompatApp.SIGNATURE_PROTECTED_PERMISSION);
++            persistent.setProcessName(mainProcessName);
++            persistent.setPermission(GmsCompatApp.SELF_PERMISSION);
++
++            ParsedServiceImpl fileProxy = createService(pkg, GmsCoreFileProxyService.class.getName());
++            fileProxy.setDirectBootAware(true);
++            fileProxy.setProcessName(mainProcessName);
++            fileProxy.setExported(true);
+ 
+-            return List.of(mp, persistent);
++            return List.of(mp, persistent, fileProxy);
+         }
+     }
+ }
+diff --git a/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java b/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
+index 2f37f07576..54039155db 100644
+--- a/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
++++ b/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
+@@ -23,14 +23,16 @@ public class PackageHooksRegistry {
+     }
+ 
+     public static PackageHooks getHooks(int packageId) {
++        GmsCompatPackageHooks gmsCompatHooks = GmsCompatPackageHooks.maybeGet(packageId);
++        if (gmsCompatHooks != null) {
++            return gmsCompatHooks;
++        }
++
+         return switch (packageId) {
+             case PackageId.EUICC_SUPPORT_PIXEL -> new EuiccSupportPixelHooks();
+-            case PackageId.G_CARRIER_SETTINGS -> new GCarrierSettingsHooks();
+             case PackageId.G_EUICC_LPA -> new EuiccGoogleHooks();
+-            case PackageId.ANDROID_AUTO -> new AndroidAutoHooks();
+             case PackageId.PIXEL_CAMERA_SERVICES -> new PixelCameraServicesHooks();
+             case PackageId.PIXEL_HEALTH -> new PixelHealthHooks();
+-            case PackageId.GMS_CORE -> new GmsCoreHooks();
+             default -> PackageHooks.DEFAULT;
+         };
+     }

@@ -1,0 +1,61 @@
+From c058b15f419efa21a6866e873525f8212625b075 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Wed, 21 Oct 2026 05:10:12 +0000
+Subject: [PATCH 44/67] gmscompat: add debug-build option to bypass installer
+ checks for GMS packages
+
+(cherry picked from commit bc2dc5668848c7dbecbb0b5c5b5c09917430cc5a)
+---
+ .../server/pm/PackageInstallerSession.java    | 21 +++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/services/core/java/com/android/server/pm/PackageInstallerSession.java b/services/core/java/com/android/server/pm/PackageInstallerSession.java
+index 94d5fb38c0..ef9f7847eb 100644
+--- a/services/core/java/com/android/server/pm/PackageInstallerSession.java
++++ b/services/core/java/com/android/server/pm/PackageInstallerSession.java
+@@ -180,6 +180,7 @@ import android.os.incremental.StorageHealthCheckParams;
+ import android.os.incremental.V4Signature;
+ import android.os.storage.StorageManager;
+ import android.provider.DeviceConfig;
++import android.provider.Settings;
+ import android.service.persistentdata.PersistentDataBlockManager;
+ import android.stats.devicepolicy.DevicePolicyEnums;
+ import android.system.ErrnoException;
+@@ -5016,6 +5017,12 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
+             boolean skipExtraChecks = isInstallerPlayStore &&
+                      com.android.internal.gmscompat.PlayStoreHooks.isInstallAllowed(mPackageName,
+                              mContext.getContentResolver());
++            String debugBuildMessageEnding = null;
++            if (!skipExtraChecks && android.os.Flags.isDevBuild()) {
++                String key = "gmscompat_bypass_install_checks";
++                skipExtraChecks = Settings.Global.getInt(mContext.getContentResolver(), key, 0) == 1;
++                debugBuildMessageEnding = " To bypass this check, run 'settings put global " + key + " 1'.";
++            }
+ 
+             if (!skipExtraChecks) {
+                 switch (mPackageName) {
+@@ -5036,14 +5043,20 @@ public class PackageInstallerSession extends IPackageInstallerSession.Stub {
+                         }
+ 
+                         String msg = "Installation of " + mPackageName
+-                                + " is blocked to prevent breaking gmscompat";
++                                + " is blocked to prevent breaking gmscompat.";
++                        if (debugBuildMessageEnding != null) {
++                            msg += debugBuildMessageEnding;
++                        }
+                         throw new PackageManagerException(errorCode, msg);
+                     }
+                     case PackageId.ANDROID_AUTO_NAME:
+                     case PackageId.PIXEL_HEALTH_NAME:
+-                        throw new PackageManagerException(errorCode,
+-                                "Only the first-party package source and shell are allowed " +
+-                                        "to install " + mPackageName);
++                        String msg = "Only the first-party package source and shell are allowed " +
++                                        "to install " + mPackageName + '.';
++                        if (debugBuildMessageEnding != null) {
++                            msg += debugBuildMessageEnding;
++                        }
++                        throw new PackageManagerException(errorCode, msg);
+                 }
+             }
+         }

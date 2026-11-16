@@ -10,4 +10,13 @@
   <project path="hardware/mediatek"                 name="hardware_mediatek"                 remote="yaap" revision="seventeen" />
   <project path="device/mediatek/sepolicy_vndr"     name="device_mediatek_sepolicy_vndr"     remote="yaap" revision="seventeen" />
   <project path="packages/apps/DisplayFeatures"     name="packages_apps_DisplayFeatures"     remote="yaap" revision="seventeen" />
+
+  <!-- GrapheneOS sandboxed Google Play (GmsCompat), phase 2: docs/06-gmscompat-port.md. -->
+  <remote name="grapheneos" fetch="https://github.com/GrapheneOS/" />
+
+  <project path="packages/apps/GmsCompat"           name="platform_packages_apps_GmsCompat"       remote="grapheneos" revision="17" />
+  <project path="packages/apps/AppCompatConfig"     name="platform_packages_apps_AppCompatConfig" remote="grapheneos" revision="17" />
+  <project path="packages/apps/LogViewer"           name="platform_packages_apps_LogViewer"       remote="grapheneos" revision="17" />
+  <project path="external/GmsCompatConfig"          name="platform_external_GmsCompatConfig"      remote="grapheneos" revision="17" clone-depth="1" />
+  <project path="external/AppCompatConfig"          name="platform_external_AppCompatConfig"      remote="grapheneos" revision="17" clone-depth="1" />
 </manifest>

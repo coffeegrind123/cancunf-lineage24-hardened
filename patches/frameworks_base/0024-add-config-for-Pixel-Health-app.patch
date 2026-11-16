@@ -1,0 +1,153 @@
+From ad8a447e1d499468a8983b7603a0eea47df32056 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 26 Aug 2024 17:18:13 +0300
+Subject: [PATCH 24/67] add config for Pixel Health app
+
+(cherry picked from commit 87a50879a20f74acf233364fc919789dfe3b26c3)
+---
+ .../server/pm/ext/PackageHooksRegistry.java   |  2 +
+ .../server/pm/ext/PixelHealthHooks.java       | 98 +++++++++++++++++++
+ .../android/telephony/TelephonyManager.java   |  5 +
+ 3 files changed, 105 insertions(+)
+ create mode 100644 services/core/java/com/android/server/pm/ext/PixelHealthHooks.java
+
+diff --git a/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java b/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
+index 807bb39199..2f37f07576 100644
+--- a/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
++++ b/services/core/java/com/android/server/pm/ext/PackageHooksRegistry.java
+@@ -17,6 +17,7 @@ public class PackageHooksRegistry {
+             case PackageId.EUICC_SUPPORT_PIXEL_NAME -> new EuiccSupportPixelHooks.ParsingHooks();
+             case PackageId.G_EUICC_LPA_NAME -> new EuiccGoogleHooks.ParsingHooks();
+             case PackageId.PIXEL_CAMERA_SERVICES_NAME -> new PixelCameraServicesHooks.ParsingHooks();
++            case PackageId.PIXEL_HEALTH_NAME -> new PixelHealthHooks.ParsingHooks();
+             default -> PackageParsingHooks.DEFAULT;
+         };
+     }
+@@ -28,6 +29,7 @@ public class PackageHooksRegistry {
+             case PackageId.G_EUICC_LPA -> new EuiccGoogleHooks();
+             case PackageId.ANDROID_AUTO -> new AndroidAutoHooks();
+             case PackageId.PIXEL_CAMERA_SERVICES -> new PixelCameraServicesHooks();
++            case PackageId.PIXEL_HEALTH -> new PixelHealthHooks();
+             case PackageId.GMS_CORE -> new GmsCoreHooks();
+             default -> PackageHooks.DEFAULT;
+         };
+diff --git a/services/core/java/com/android/server/pm/ext/PixelHealthHooks.java b/services/core/java/com/android/server/pm/ext/PixelHealthHooks.java
+new file mode 100644
+index 0000000000..4011dffaf8
+--- /dev/null
++++ b/services/core/java/com/android/server/pm/ext/PixelHealthHooks.java
+@@ -0,0 +1,98 @@
++package com.android.server.pm.ext;
++
++import android.Manifest;
++import android.app.ActivityThread;
++import android.app.role.RoleManager;
++import android.content.ContentResolver;
++import android.content.Context;
++import android.ext.PackageId;
++
++import com.android.internal.gmscompat.PlayStoreHooks;
++import com.android.internal.pm.pkg.component.ParsedUsesPermission;
++import com.android.internal.pm.pkg.parsing.PackageParsingHooks;
++import com.android.role.RoleManagerLocal;
++import com.android.server.LocalManagerRegistry;
++import com.android.server.pm.pkg.AndroidPackage;
++import com.android.server.pm.pkg.PackageStateInternal;
++
++import java.util.Objects;
++import java.util.Set;
++
++class PixelHealthHooks extends PackageHooks {
++    static final String PERMISSION_FAR_INFRARED_TEMPERATURE =
++            "com.google.sensor.permission.FAR_INFRARED_TEMPERATURE";
++
++    static class ParsingHooks extends PackageParsingHooks {
++
++        @Override
++        public boolean shouldSkipUsesPermission(ParsedUsesPermission p) {
++            switch (p.getName()) {
++                case Manifest.permission.CAMERA:
++                case Manifest.permission.VIBRATE:
++                case PERMISSION_FAR_INFRARED_TEMPERATURE:
++                    return false;
++                default:
++                    // The only other permission is READ_DEVICE_CONFIG as of versionCode 2224;
++                    // intentionally omit unknown permissions that might be added in future versions
++                    // since they could require special handling
++                    return true;
++            }
++        }
++    }
++
++    @Override
++    public int overridePermissionState(String permission, int userId) {
++        if (PERMISSION_FAR_INFRARED_TEMPERATURE.equals(permission)) {
++            // This permission is defined in the PixelDisplayService (com.android.pixeldisplayservice)
++            // system package with protectionLevel "preinstalled|signature", i.e. it's granted
++            // automatically to preinstalled packages and to packages that are signed with the same
++            // certificate as PixelDisplayService. Note that PixelDisplayService is re-signed with
++            // the platform certificate on GrapheneOS.
++            //
++            // On stock Pixel OS, Pixel Health is a preinstalled app.
++            //
++            // Allow this permission unconditionally, given that its enforcement is implemented in
++            // proprietary Google code and that the Pixel Health app implements a toggle that
++            // disables its access to the FIR sensor.
++            return PERMISSION_OVERRIDE_GRANT;
++        }
++        return NO_PERMISSION_OVERRIDE;
++    }
++
++    @Override
++    public boolean shouldBlockPackageVisibility(int userId, PackageStateInternal otherPkg, boolean isSelfToOther) {
++        if (!isUserInstalledPkg(otherPkg)) {
++            return false;
++        }
++
++        if ("com.fitbit.FitbitMobile".equals(otherPkg.getPackageName())) {
++            // Pixel Health app performs Fitbit certificate checks itself
++            return false;
++        }
++
++        if (isSelfToOther) {
++            // hide all other user apps from Pixel Health app
++            return true;
++        }
++
++        AndroidPackage otherAPkg = otherPkg.getPkg();
++        if (otherAPkg == null) {
++            return true;
++        }
++
++        if (PackageExt.get(otherAPkg).getPackageId() == PackageId.PLAY_STORE) {
++            Context ctx = ActivityThread.currentActivityThread().getSystemContext();
++            ContentResolver cr = ctx.getContentResolver();
++            return !PlayStoreHooks.isInstallAllowed(PackageId.PIXEL_HEALTH_NAME, cr);
++        }
++
++        RoleManagerLocal roleManager = Objects.requireNonNull(
++                LocalManagerRegistry.getManager(RoleManagerLocal.class)
++        );
++        Set<String> homeRoleHolders = roleManager.getRolesAndHolders(userId).get(RoleManager.ROLE_HOME);
++        // Don't block visiblity from current launcher to Pixel Health app. Association restrictions
++        // between them remain enforced.
++        boolean isAllowed = homeRoleHolders != null && homeRoleHolders.contains(otherAPkg.getPackageName());
++        return !isAllowed;
++    }
++}
+diff --git a/telephony/java/android/telephony/TelephonyManager.java b/telephony/java/android/telephony/TelephonyManager.java
+index 0ab9f5410a..8c6ec2011b 100644
+--- a/telephony/java/android/telephony/TelephonyManager.java
++++ b/telephony/java/android/telephony/TelephonyManager.java
+@@ -4077,6 +4077,11 @@ public class TelephonyManager {
+      */
+     @RequiresFeature(PackageManager.FEATURE_TELEPHONY_SUBSCRIPTION)
+     public String getSimCountryIso() {
++        if (android.app.AppGlobals.getInitialPackageId() == android.ext.PackageId.PIXEL_HEALTH) {
++            // Body temperature feature is region-locked to US as of version 2224
++            return "us";
++        }
++
+         return getSimCountryIsoForPhone(getPhoneId());
+     }
+ 

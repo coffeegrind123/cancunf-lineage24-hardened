@@ -1,0 +1,22 @@
+From 3f2943d4c10ab1c9998bc492eb81493007fd9491 Mon Sep 17 00:00:00 2001
+From: Daniel Micay <danielmicay@gmail.com>
+Date: Sun, 30 Jan 2022 02:17:12 -0500
+Subject: [PATCH 2/7] add GmsCompat app
+
+(cherry picked from commit 7d30fd72b16ac0554f4764a9156e91aa11f17ad9)
+---
+ target/product/handheld_system.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/product/handheld_system.mk b/target/product/handheld_system.mk
+index 6bd76e658..982e3c502 100644
+--- a/target/product/handheld_system.mk
++++ b/target/product/handheld_system.mk
+@@ -53,6 +53,7 @@ PRODUCT_PACKAGES += \
+     EasterEgg \
+     ExternalStorageProvider \
+     FusedLocation \
++    GmsCompat \
+     InputDevices \
+     KeyChain \
+     librs_jni \

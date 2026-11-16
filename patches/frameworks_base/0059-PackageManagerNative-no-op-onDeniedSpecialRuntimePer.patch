@@ -1,0 +1,36 @@
+From db113a5044a9a98c9d8addbf76b1a1e90b5e7fa4 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sun, 15 Nov 2026 20:24:11 +0000
+Subject: [PATCH 59/67] PackageManagerNative: no-op
+ onDeniedSpecialRuntimePermissionOp
+
+IPackageManagerNative declares it since GrapheneOS c35f173a11. Its
+only implementation in GrapheneOS shows the OTHER_SENSORS denial
+notification (814d776c8b), a feature this build does not carry.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../com/android/server/pm/PackageManagerNative.java  | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/services/core/java/com/android/server/pm/PackageManagerNative.java b/services/core/java/com/android/server/pm/PackageManagerNative.java
+index da0790edaa..aceb4e3e64 100644
+--- a/services/core/java/com/android/server/pm/PackageManagerNative.java
++++ b/services/core/java/com/android/server/pm/PackageManagerNative.java
+@@ -252,4 +252,16 @@ final class PackageManagerNative extends IPackageManagerNative.Stub {
+         return mPm.mInstallerService.getStagingManager().getStagedApexInfos().toArray(
+                 new StagedApexInfo[0]);
+     }
++
++    // Declared by GrapheneOS's special runtime permission infrastructure (c35f173a11). Its only
++    // user is the OTHER_SENSORS denial notification (GrapheneOS 814d776c8b), which this build
++    // does not carry, so a denial needs no action here. The caller check is kept so that only
++    // system processes can reach it, as upstream.
++    @Override
++    public void onDeniedSpecialRuntimePermissionOp(String permissionName, int uid,
++            String packageName) {
++        if (Binder.getCallingUid() != android.os.Process.SYSTEM_UID) {
++            throw new SecurityException();
++        }
++    }
+ }

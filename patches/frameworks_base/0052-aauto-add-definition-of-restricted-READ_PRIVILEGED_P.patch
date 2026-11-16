@@ -1,0 +1,39 @@
+From 4e1f7162a7e612f5fe920604adaf88c0f23bdfce Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 25 Dec 2023 21:22:23 +0200
+Subject: [PATCH 52/67] aauto: add definition of restricted
+ READ_PRIVILEGED_PHONE_STATE permission
+
+(cherry picked from commit 179e246d8404395a44bb26137c31b6e1cca70621)
+---
+ core/api/system-current.txt  | 1 +
+ core/res/AndroidManifest.xml | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/core/api/system-current.txt b/core/api/system-current.txt
+index a888f11597..4e4a455fb1 100644
+--- a/core/api/system-current.txt
++++ b/core/api/system-current.txt
+@@ -388,6 +388,7 @@ package android {
+     field public static final String READ_PRINT_SERVICES = "android.permission.READ_PRINT_SERVICES";
+     field public static final String READ_PRINT_SERVICE_RECOMMENDATIONS = "android.permission.READ_PRINT_SERVICE_RECOMMENDATIONS";
+     field public static final String READ_PRIVILEGED_PHONE_STATE = "android.permission.READ_PRIVILEGED_PHONE_STATE";
++    field public static final String READ_PRIVILEGED_PHONE_STATE_ANDROID_AUTO = "android.permission.READ_PRIVILEGED_PHONE_STATE_ANDROID_AUTO";
+     field public static final String READ_PROJECTION_STATE = "android.permission.READ_PROJECTION_STATE";
+     field @FlaggedApi("android.companion.task_continuity") public static final String READ_REMOTE_TASKS = "android.permission.READ_REMOTE_TASKS";
+     field public static final String READ_RESTRICTED_STATS = "android.permission.READ_RESTRICTED_STATS";
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index 062d034a85..56ada13ad1 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -3459,6 +3459,10 @@
+         android:protectionLevel="signature|privileged|role"
+         android:permissionFlags="allowedInPrivateComputeCore" />
+ 
++    <!-- @SystemApi @hide -->
++    <permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE_ANDROID_AUTO"
++        android:protectionLevel="internal" />
++
+     <!-- Allows to read device identifiers and use ICC based authentication like EAP-AKA.
+          Often required in authentication to access the carrier's server and manage services
+          of the subscriber.

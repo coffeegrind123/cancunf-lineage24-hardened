@@ -1,0 +1,210 @@
+From 8757a8a02901176c2aec4d42fd173d4991137450 Mon Sep 17 00:00:00 2001
+From: inthewaves <inthewaves@pm.me>
+Date: Fri, 20 Feb 2026 04:50:14 -0800
+Subject: [PATCH 64/67] add method for updating and invalidating package state
+
+(This commit could probably be combined with commit "add method for updating cached package
+permission state", 360638e0a1d8c61ad0b3696360535ed182f6f19e)
+
+Package permission state is updated automatically for all packages after events that might impact
+it, e.g. after package install or uninstall, after storage volume mount, after OS update etc.
+
+On GrapheneOS, per-package permission policy can be changed via GosPackageState packageFlags.
+This new method is needed for updating the cached permission state manually after packageFlags
+change.
+
+(cherry picked from commit ae04aec5f56d75f0a2b1f49e70b87ac24c24d651)
+---
+ .../permission/IPermissionManager.aidl        |  2 +
+ .../android/permission/PermissionManager.java |  9 +++
+ core/res/AndroidManifest.xml                  |  4 ++
+ packages/Shell/AndroidManifest.xml            |  2 +
+ .../permission/PermissionManagerService.java  | 65 +++++++++++++++++++
+ .../PermissionManagerServiceInterface.java    |  2 +
+ .../permission/AppIdPermissionPolicy.kt       |  2 +-
+ .../access/permission/PermissionService.kt    |  8 +++
+ 8 files changed, 93 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/android/permission/IPermissionManager.aidl b/core/java/android/permission/IPermissionManager.aidl
+index ead008d8b4..764ed0ca16 100644
+--- a/core/java/android/permission/IPermissionManager.aidl
++++ b/core/java/android/permission/IPermissionManager.aidl
+@@ -110,6 +110,8 @@ interface IPermissionManager {
+     Map<String, PermissionState> getAllPermissionStates(String packageName, String persistentDeviceId, int userId);
+ 
+     int getPermissionRequestState(String packageName, String permissionName, int deviceId);
++
++    void updatePermissionStateAndInvalidateCache(String packageName, int userId);
+ }
+ 
+ /**
+diff --git a/core/java/android/permission/PermissionManager.java b/core/java/android/permission/PermissionManager.java
+index 3eca978aa8..b15ac13446 100644
+--- a/core/java/android/permission/PermissionManager.java
++++ b/core/java/android/permission/PermissionManager.java
+@@ -2299,4 +2299,13 @@ public final class PermissionManager {
+                     + '}';
+         }
+     }
++
++    /** @hide */
++    public void updatePermissionStateAndInvalidateCache(@NonNull String packageName, int userId) {
++        try {
++            mPermissionManager.updatePermissionStateAndInvalidateCache(packageName, userId);
++        } catch (RemoteException e) {
++            e.rethrowFromSystemServer();
++        }
++    }
+ }
+diff --git a/core/res/AndroidManifest.xml b/core/res/AndroidManifest.xml
+index 7ba41f8851..a4d72dd9f2 100644
+--- a/core/res/AndroidManifest.xml
++++ b/core/res/AndroidManifest.xml
+@@ -7154,6 +7154,10 @@
+     <permission android:name="android.permission.INSTALL_GRANT_RUNTIME_PERMISSIONS"
+         android:protectionLevel="signature|installer|verifier" />
+ 
++    <!--- @hide -->
++    <permission android:name="android.permission.UPDATE_AND_INVALIDATE_PERMISSION_STATE"
++        android:protectionLevel="internal|preinstalled" />
++
+     <!-- @SystemApi Allows an application to revoke specific permissions.
+         @hide -->
+     <permission android:name="android.permission.REVOKE_RUNTIME_PERMISSIONS"
+diff --git a/packages/Shell/AndroidManifest.xml b/packages/Shell/AndroidManifest.xml
+index 7f207f8307..34e53f2ede 100644
+--- a/packages/Shell/AndroidManifest.xml
++++ b/packages/Shell/AndroidManifest.xml
+@@ -1112,6 +1112,8 @@
+     <!-- Permission required for CTS test - CtsMediaProjectionTestCases -->
+     <uses-permission android:name="android.permission.MANAGE_MEDIA_PROJECTION" />
+ 
++    <!--  Permission required for GrapheneOS package state updates -->
++    <uses-permission android:name="android.permission.UPDATE_AND_INVALIDATE_PERMISSION_STATE" />
+     <!-- Permission required for CTS test - CtsAnomalyDetectorTests -->
+     <uses-permission android:name="android.permission.CONFIGURE_ANOMALY_DETECTOR" />
+ 
+diff --git a/services/core/java/com/android/server/pm/permission/PermissionManagerService.java b/services/core/java/com/android/server/pm/permission/PermissionManagerService.java
+index 7db394d87b..e1490f5e7b 100644
+--- a/services/core/java/com/android/server/pm/permission/PermissionManagerService.java
++++ b/services/core/java/com/android/server/pm/permission/PermissionManagerService.java
+@@ -40,6 +40,7 @@ import android.annotation.Nullable;
+ import android.annotation.SpecialUsers.CanBeALL;
+ import android.annotation.UserIdInt;
+ import android.app.ActivityManager;
++import android.app.AppGlobals;
+ import android.app.AppOpsManager;
+ import android.app.AppOpsManager.AttributionFlags;
+ import android.app.IActivityManager;
+@@ -496,6 +497,70 @@ public class PermissionManagerService extends IPermissionManager.Stub {
+         return result;
+     }
+ 
++    @Override
++    public void updatePermissionStateAndInvalidateCache(String packageName, int userId) {
++        mContext.enforceCallingPermission(
++                android.Manifest.permission.UPDATE_AND_INVALIDATE_PERMISSION_STATE,
++                "updatePermissionStateAndInvalidateCache");
++
++        final int callingUid = Binder.getCallingUid();
++        if (UserHandle.getUserId(callingUid) != userId) {
++            final boolean isCallerAllowed = mContext.checkCallingPermission(
++                    Manifest.permission.INTERACT_ACROSS_USERS_FULL)
++                    == PackageManager.PERMISSION_GRANTED;
++            if (!isCallerAllowed) {
++                throw new SecurityException(
++                        "uid " + callingUid + " can't update state for " + userId);
++            }
++            Slog.w(LOG_TAG, "updatePermissionStateAndInvalidateCache: cross user granted for " + callingUid);
++        }
++
++        final String callingPackage;
++        {
++            final AndroidPackage callingAndroidPackage = mPackageManagerInt.getPackage(callingUid);
++            if (callingAndroidPackage == null) {
++                Slog.w(LOG_TAG, "updatePermissionStateAndInvalidateCache: no callingPackage "
++                        + "for uid " + callingUid);
++                return;
++            }
++            callingPackage = callingAndroidPackage.getPackageName();
++        }
++
++        PackageState packageState = mPackageManagerInt.getPackageStateInternal(packageName);
++        if (packageState == null) {
++            Slog.w(LOG_TAG, "updatePermissionStateAndInvalidateCache: no PackageState "
++                    + "for " + packageName);
++            return;
++        }
++        mPermissionManagerServiceImpl.updatePermissions(packageState, userId);
++
++        final var pm = AppGlobals.getPackageManager();
++
++        final long identity = Binder.clearCallingIdentity();
++        try {
++            final var appInfo = pm.getApplicationInfo(packageName, 0, userId);
++            if (appInfo == null) {
++                Slog.w(LOG_TAG, "updatePermissionStateAndInvalidateCache: no "
++                        + "appInfo for " + packageName);
++                return;
++            }
++
++            if (appInfo.enabled) {
++                // Invalidate cached system_server state; clearing identity, since this requires
++                // Manifest.permission.CHANGE_COMPONENT_ENABLED_STATE
++                pm.setApplicationEnabledSetting(packageName,
++                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED, 0, userId, callingPackage);
++                pm.setApplicationEnabledSetting(packageName,
++                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED, 0, userId, callingPackage);
++            }
++        } catch (RemoteException e) {
++            Slog.e(LOG_TAG, "updatePermissionStateAndInvalidateCache: failed "
++                    + "for " + packageName, e);
++        } finally {
++            Binder.restoreCallingIdentity(identity);
++        }
++    }
++
+     /* Start of delegate methods to PermissionManagerServiceInterface */
+ 
+     @Override
+diff --git a/services/core/java/com/android/server/pm/permission/PermissionManagerServiceInterface.java b/services/core/java/com/android/server/pm/permission/PermissionManagerServiceInterface.java
+index 87d88755d3..d3228eb546 100644
+--- a/services/core/java/com/android/server/pm/permission/PermissionManagerServiceInterface.java
++++ b/services/core/java/com/android/server/pm/permission/PermissionManagerServiceInterface.java
+@@ -667,4 +667,6 @@ public interface PermissionManagerServiceInterface extends PermissionManagerInte
+     void onPackageUninstalled(@NonNull String packageName, int appId,
+             @NonNull PackageState packageState, @Nullable AndroidPackage pkg,
+             @NonNull List<AndroidPackage> sharedUserPkgs, @CanBeALL @UserIdInt int userId);
++
++    void updatePermissions(@NonNull PackageState packageState, int userId);
+ }
+diff --git a/services/permission/java/com/android/server/permission/access/permission/AppIdPermissionPolicy.kt b/services/permission/java/com/android/server/permission/access/permission/AppIdPermissionPolicy.kt
+index 1ed4d40a91..5e102b653e 100644
+--- a/services/permission/java/com/android/server/permission/access/permission/AppIdPermissionPolicy.kt
++++ b/services/permission/java/com/android/server/permission/access/permission/AppIdPermissionPolicy.kt
+@@ -1046,7 +1046,7 @@ class AppIdPermissionPolicy : SchemePolicy() {
+         }
+     }
+ 
+-    private fun MutateStateScope.evaluateAllPermissionStatesForPackageAndUser(
++    fun MutateStateScope.evaluateAllPermissionStatesForPackageAndUser(
+         packageState: PackageState,
+         userId: Int,
+         installedPackageState: PackageState?,
+diff --git a/services/permission/java/com/android/server/permission/access/permission/PermissionService.kt b/services/permission/java/com/android/server/permission/access/permission/PermissionService.kt
+index c4af7ab524..5784179807 100644
+--- a/services/permission/java/com/android/server/permission/access/permission/PermissionService.kt
++++ b/services/permission/java/com/android/server/permission/access/permission/PermissionService.kt
+@@ -3179,4 +3179,12 @@ class PermissionService(private val service: AccessCheckingService) :
+ 
+         private const val MAX_ALLOWED_BPF_PERMISSIONS = Int.SIZE_BITS
+     }
++
++    override fun updatePermissions(pkgState: PackageState, userId: Int) {
++        service.mutateState {
++            with(policy) {
++                evaluateAllPermissionStatesForPackageAndUser(pkgState, userId, null)
++            }
++        }
++    }
+ }

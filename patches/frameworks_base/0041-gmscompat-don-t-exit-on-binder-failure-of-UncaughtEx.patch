@@ -1,0 +1,44 @@
+From 13552f745a20b1485ea57ff108778570ff5d43f6 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Thu, 15 Oct 2026 15:36:56 +0000
+Subject: [PATCH 41/67] gmscompat: don't exit on binder failure of
+ UncaughtExceptionPreHandler
+
+(cherry picked from commit 55ef4eca218f366e0d37ae6485414b9c99367c6f)
+---
+ core/java/com/android/internal/gmscompat/GmsCompatApp.java | 4 ++++
+ core/java/com/android/internal/gmscompat/GmsHooks.java     | 6 +++++-
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/com/android/internal/gmscompat/GmsCompatApp.java b/core/java/com/android/internal/gmscompat/GmsCompatApp.java
+index 2807b81ca6..70950e9dad 100644
+--- a/core/java/com/android/internal/gmscompat/GmsCompatApp.java
++++ b/core/java/com/android/internal/gmscompat/GmsCompatApp.java
+@@ -84,6 +84,10 @@ public final class GmsCompatApp {
+         gms2GcaServiceBinding.voidCallOrExit(callFn);
+     }
+ 
++    public static SynchronousServiceBinding<IGms2Gca> gms2GcaBinding() {
++        return gms2GcaServiceBinding;
++    }
++
+     private static SynchronousServiceBinding<IClientOfGmsCore2Gca> clientOfGmsCore2GcaBinding;
+ 
+     public static SynchronousServiceBinding<IClientOfGmsCore2Gca> iClientOfGmsCore2Gca() {
+diff --git a/core/java/com/android/internal/gmscompat/GmsHooks.java b/core/java/com/android/internal/gmscompat/GmsHooks.java
+index 8c4be8b782..47bd870180 100644
+--- a/core/java/com/android/internal/gmscompat/GmsHooks.java
++++ b/core/java/com/android/internal/gmscompat/GmsHooks.java
+@@ -180,7 +180,11 @@ public final class GmsHooks {
+             // Send the report to GmsCompatApp before GMS receives the uncaughtException() callback.
+ 
+             if (!shouldSkipException(e)) {
+-                GmsCompatApp.voidCall(i -> i.onUncaughtException(aer));
++                try {
++                    GmsCompatApp.gms2GcaBinding().voidCall(i -> i.onUncaughtException(aer));
++                } catch (RemoteException re) {
++                    Log.e(TAG, "", re);
++                }
+             }
+ 
+             if (orig != null) {

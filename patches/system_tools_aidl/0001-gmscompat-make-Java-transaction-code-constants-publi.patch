@@ -1,0 +1,25 @@
+From 859cddc13cf4f16d3c65fa5ae676b4db98dc4219 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 20 Oct 2025 22:49:16 +0300
+Subject: [PATCH 1/2] gmscompat: make Java transaction code constants public
+
+Change-Id: Ie8701eeae25930879aa3b0258993c6619d095985
+(cherry picked from commit 95b6587ab9f4e61f98f30b69b3129d75054aee0b)
+---
+ generate_java_binder.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/generate_java_binder.cpp b/generate_java_binder.cpp
+index fdd911aa..72352d94 100644
+--- a/generate_java_binder.cpp
++++ b/generate_java_binder.cpp
+@@ -880,7 +880,8 @@ static void GenerateMethods(const AidlInterface& iface, const AidlMethod& method
+   transactCodeName += method.GetName();
+ 
+   auto transactCode =
+-      std::make_shared<Field>(STATIC | FINAL, std::make_shared<Variable>("int", transactCodeName));
++      std::make_shared<Field>(PUBLIC | STATIC | FINAL, std::make_shared<Variable>("int", transactCodeName));
++  transactCode->comment = "/** @hide */";
+   transactCode->value =
+       StringPrintf("(android.os.IBinder.FIRST_CALL_TRANSACTION + %d)", index);
+   stubClass->elements.push_back(transactCode);

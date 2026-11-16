@@ -1,0 +1,22 @@
+From 07c070bb9d2e32d78de7f8f0d75a2a1418ca21b8 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Sat, 6 Jan 2024 19:47:32 +0200
+Subject: [PATCH 6/7] add LogViewer app
+
+(cherry picked from commit 2ae74c3005e090be8f76219779b303e129cafee8)
+---
+ target/product/handheld_system.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/product/handheld_system.mk b/target/product/handheld_system.mk
+index 982e3c502..ec2c4791c 100644
+--- a/target/product/handheld_system.mk
++++ b/target/product/handheld_system.mk
+@@ -57,6 +57,7 @@ PRODUCT_PACKAGES += \
+     InputDevices \
+     KeyChain \
+     librs_jni \
++    LogViewer \
+     ManagedProvisioning \
+     MmsService \
+     MtpService \

@@ -1,0 +1,683 @@
+From 5446b7ec6748013731269ff835a1bc4f928a40f2 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Wed, 15 Nov 2023 13:44:23 +0200
+Subject: [PATCH 5/6] infrastructure for AppSwitch UIs
+
+Squashed with 28baa8dcbf5a0d285d8bf3852b723beaa290a973 by quh4gko8 <88831734+quh4gko8@users.noreply.github.com>
+
+Adapted: adds the exploit_protection_settings string, which GrapheneOS
+defines with its Exploit protection screen (not ported). The path it
+builds is shown only for Exploit protection switches.
+
+(cherry picked from commit c521c7dbf53dd65edfb9bbf6510593675c00bc6e)
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ res/values/strings_app_exploit_protection.xml |  37 +++
+ res/values/strings_ext.xml                    |   1 +
+ .../settings/applications/AswAdapter.kt       |  88 +++++++
+ .../applications/AswAppInfoFragment.java      | 228 ++++++++++++++++++
+ .../AswAppListPrefController.java             |  27 +++
+ .../AswExploitProtectionFragment.java         |  44 ++++
+ .../spa/app/appinfo/AppInfoSettings.kt        |   3 +
+ .../settings/spa/app/appinfo/AswAppList.kt    | 101 ++++++++
+ .../settings/spa/app/appinfo/AswPreference.kt |  27 +++
+ .../spa/app/appinfo/PackageInfoPresenter.kt   |   5 +-
+ 10 files changed, 560 insertions(+), 1 deletion(-)
+ create mode 100644 res/values/strings_app_exploit_protection.xml
+ create mode 100644 src/com/android/settings/applications/AswAdapter.kt
+ create mode 100644 src/com/android/settings/applications/AswAppInfoFragment.java
+ create mode 100644 src/com/android/settings/applications/AswAppListPrefController.java
+ create mode 100644 src/com/android/settings/applications/AswExploitProtectionFragment.java
+ create mode 100644 src/com/android/settings/spa/app/appinfo/AswAppList.kt
+ create mode 100644 src/com/android/settings/spa/app/appinfo/AswPreference.kt
+
+diff --git a/res/values/strings_app_exploit_protection.xml b/res/values/strings_app_exploit_protection.xml
+new file mode 100644
+index 0000000000..5081ee0a03
+--- /dev/null
++++ b/res/values/strings_app_exploit_protection.xml
+@@ -0,0 +1,37 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="exploit_protection_category_title">Exploit protection</string>
++
++    <string name="aep_allowed">Allowed</string>
++    <string name="aep_blocked">Blocked</string>
++    <string name="aep_default">Default (%1$s)</string>
++    <string name="aep_disabled">Disabled</string>
++    <string name="aep_enabled">Enabled</string>
++    <string name="aep_restricted">Restricted</string>
++
++    <string name="aep_confirm_disable_title">Warning</string>
++    <string name="aep_confirm_disable_warning_msg">This setting will weaken exploit protections for the selected app.</string>
++    <string name="aep_confirm_disable_proceed_btn">Proceed</string>
++
++    <string name="aep_dvr_default_security_setting">Default value can be changed in the %1$s section</string>
++
++    <string name="aep_dvr_compat_config_hardening_opt_in">The selected app is known to be compatible with this setting</string>
++    <string name="aep_dvr_compat_config_hardening_opt_out">%1$s by default, because this app is known to need it.
++This behavior can be disabled in the %2$s section.</string>
++
++    <string name="aep_dvr_app_is_client_of_gmscore">%1$s by default because this app depends on Play services</string>
++
++    <string name="aep_default_main_switch_block_for_3p_apps">Block for third-party apps by default</string>
++    <string name="aep_default_main_switch_restrict_for_3p_apps">Restrict for third-party apps by default</string>
++    <string name="aep_default_main_switch_disable_for_3p_apps">Disable for third-party apps by default</string>
++    <string name="aep_default_summary_restricted">Restricted by default</string>
++    <string name="aep_default_summary_restricted_except_for_gmscore_clients">Restricted by default, except for apps that depend on Play services</string>
++    <string name="aep_default_summary_disabled">Disabled by default</string>
++    <string name="aep_default_summary_blocked">Blocked by default</string>
++    <string name="aep_default_summary_allowed_for_3p_apps">Allowed for third-party apps by default</string>
++    <string name="aep_default_summary_enabled_for_3p_apps">Enabled for third-party apps by default</string>
++
++    <string name="aep_ir_exploit_protection_compat_mode">%1$s is enabled</string>
++
++    <string name="aep_compat_mode_title">Exploit protection compatibility mode</string>
++</resources>
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index 6b7f69f7cc..9e9643e81d 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -3,4 +3,5 @@
+ <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+     <string name="sandboxed_google_play">Sandboxed Google Play</string>
+     <string name="sandboxed_google_play_work_profile">Sandboxed Google Play (work profile)</string>
++    <string name="exploit_protection_settings">Exploit protection</string>
+ </resources>
+diff --git a/src/com/android/settings/applications/AswAdapter.kt b/src/com/android/settings/applications/AswAdapter.kt
+new file mode 100644
+index 0000000000..478dd02e25
+--- /dev/null
++++ b/src/com/android/settings/applications/AswAdapter.kt
+@@ -0,0 +1,88 @@
++package com.android.settings.applications
++
++import android.content.Context
++import android.content.pm.ApplicationInfo
++import android.content.pm.GosPackageState
++import android.ext.settings.app.AppSwitch
++import androidx.preference.Preference
++import androidx.preference.PreferenceScreen
++import com.android.settings.R
++import com.android.settings.SettingsPreferenceFragment
++import com.android.settings.applications.appinfo.AppInfoDashboardFragment
++import com.android.settings.spa.SpaActivity.Companion.startSpaActivity
++import com.android.settings.spa.app.appinfo.AppInfoSettingsProvider
++import com.android.settings.spa.app.appinfo.AswAppListPageProvider
++import com.android.settingslib.spaprivileged.model.app.userId
++import kotlin.reflect.KClass
++
++abstract class AswAdapter<T : AppSwitch> {
++    abstract fun getAppSwitch(): T
++
++    enum class Category {
++        ExploitProtection,
++    }
++
++    fun getCategory(): Category = Category.ExploitProtection
++
++    fun getPreferenceSummary(ctx: Context, appInfo: ApplicationInfo): CharSequence {
++        val asw = getAppSwitch()
++        val si = AppSwitch.StateInfo()
++        val userId = appInfo.userId
++        val isOn = asw.get(ctx, userId, appInfo, GosPackageState.get(appInfo.packageName, userId), si)
++        return if (si.isUsingDefaultValue) {
++            getDefaultTitle(ctx, isOn)
++        } else {
++            if (isOn) getOnTitle(ctx) else getOffTitle(ctx)
++        }
++    }
++
++    open fun getNotificationToggleTitle(ctx: Context): CharSequence? = null
++    open fun getNotificationToggleSummary(ctx: Context): CharSequence? = null
++
++    abstract fun getAswTitle(ctx: Context): CharSequence
++
++    open fun getShortAswTitle(ctx: Context) = getAswTitle(ctx)
++
++    fun getDefaultTitle(ctx: Context, isOn: Boolean): CharSequence {
++        return ctx.getString(R.string.aep_default,
++            if (isOn) getOnTitle(ctx) else getOffTitle(ctx)
++        )
++    }
++
++    open fun getOnTitle(ctx: Context): CharSequence = ctx.getText(R.string.aep_enabled)
++
++    open fun getOffTitle(ctx: Context): CharSequence = ctx.getText(R.string.aep_disabled)
++
++    abstract fun getDetailFragmentClass(): KClass<out SettingsPreferenceFragment>
++
++    fun openAppPage(context: Context, app: ApplicationInfo) {
++        AppInfoDashboardFragment.startAppInfoFragment(
++            getDetailFragmentClass().java,
++            app, context, AppInfoSettingsProvider.METRICS_CATEGORY,
++        )
++    }
++
++    fun makeAppListPageProvider() = AswAppListPageProvider(this)
++
++    fun getAppListPageProviderName() = this::class.simpleName!!
++
++    open fun shouldIncludeInAppListPage(app: ApplicationInfo, gosPs: GosPackageState) = true
++
++    fun openAppListPage(ctx: Context) {
++        ctx.startSpaActivity(getAppListPageProviderName())
++    }
++
++    @JvmOverloads
++    fun addAppListPageLink(screen: PreferenceScreen,
++                           title: CharSequence = screen.context.getText(R.string.default_see_all_apps_title)) {
++        val ctx = screen.context
++        val pref = Preference(ctx).apply {
++            this.title = title
++            setOnPreferenceClickListener { p ->
++                p.context.startSpaActivity(getAppListPageProviderName())
++                true
++            }
++        }
++        screen.addPreference(pref)
++    }
++}
+diff --git a/src/com/android/settings/applications/AswAppInfoFragment.java b/src/com/android/settings/applications/AswAppInfoFragment.java
+new file mode 100644
+index 0000000000..cac5229f78
+--- /dev/null
++++ b/src/com/android/settings/applications/AswAppInfoFragment.java
+@@ -0,0 +1,228 @@
++package com.android.settings.applications;
++
++import android.content.Context;
++import android.content.pm.ApplicationInfo;
++import android.content.pm.GosPackageState;
++import android.ext.settings.app.AppSwitch;
++import android.os.Bundle;
++
++import androidx.annotation.Nullable;
++
++import com.android.settings.R;
++import com.android.settings.applications.appinfo.RadioButtonAppInfoFragment;
++
++import java.util.ArrayList;
++import java.util.List;
++
++public abstract class AswAppInfoFragment<T extends AppSwitch>
++        extends RadioButtonAppInfoFragment {
++
++    protected static final int ID_DEFAULT = 0;
++    protected static final int ID_ON = 1;
++    protected static final int ID_OFF = 2;
++
++    public abstract AswAdapter<T> getAswAdapter();
++
++    protected AswAdapter<T> adapter;
++    private final ArrayList<PrefModel> extraPrefs = new ArrayList<>();
++    @Nullable
++    private TogglePrefModel notifTogglePref;
++
++    @Override
++    public void onCreate(Bundle savedInstanceState) {
++        adapter = getAswAdapter();
++        super.onCreate(savedInstanceState);
++
++        if (adapter.getAppSwitch().hasNotification()) {
++            Context ctx = requireContext();
++            var p = new TogglePrefModel();
++            p.title = adapter.getNotificationToggleTitle(ctx);
++            p.summary = adapter.getNotificationToggleSummary(ctx);
++            p.onChangeListener = (pref, state) -> {
++                var ed = GosPackageState.edit(mPackageName, mUserId);
++                adapter.getAppSwitch().setNotificationEnabled(ed, (boolean) state);
++                return ed.apply();
++            };
++            extraPrefs.add(p);
++            notifTogglePref = p;
++        }
++        {
++            var p = new LinkPrefModel();
++            p.title = getText(R.string.default_see_all_apps_title);
++            p.onClick = () -> adapter.openAppListPage(requireContext());
++            extraPrefs.add(p);
++        }
++    }
++
++    @Override
++    protected CharSequence getTitle() {
++        return adapter.getAswTitle(requireContext());
++    }
++
++    @Override
++    public Entry[] getEntries() {
++        Context ctx = requireContext();
++        AppSwitch asw = adapter.getAppSwitch();
++
++        int userId = mUserId;
++        GosPackageState ps = GosPackageState.get(mPackageName, userId);
++        ApplicationInfo appInfo = getAppInfo();
++        var si = new AppSwitch.StateInfo();
++        boolean state = asw.get(ctx, userId, appInfo, ps, si);
++
++        boolean isDefault = si.isUsingDefaultValue();
++        boolean isImmutable = si.isImmutable();
++
++        var defaultSi = new AppSwitch.StateInfo();
++        boolean defaultValue = asw.getDefaultValue(ctx, userId, appInfo, ps, defaultSi);
++
++        var def = createEntry(ID_DEFAULT, adapter.getDefaultTitle(ctx, defaultValue));
++        def.isChecked = isDefault;
++        def.isEnabled = !isImmutable;
++        if (def.isEnabled) {
++            int dvr = defaultSi.getDefaultValueReason();
++            CharSequence summary = getSummaryForDefaultValueReason(dvr);
++            if (summary == null) {
++                summary = switch (dvr) {
++                    case AppSwitch.DVR_DEFAULT_SETTING -> {
++                        if (!ctx.getUser().isSystem()) {
++                            yield null;
++                        }
++                        yield getString(R.string.aep_dvr_default_security_setting,
++                                getAppDefaultSettingPathForCategory(adapter.getCategory()));
++                    }
++                    case AppSwitch.DVR_APP_COMPAT_CONFIG_HARDENING_OPT_IN ->
++                        getText(R.string.aep_dvr_compat_config_hardening_opt_in);
++                    case AppSwitch.DVR_APP_COMPAT_CONFIG_HARDENING_OPT_OUT -> {
++                        if (!ctx.getUser().isSystem()) {
++                            yield null;
++                        }
++                        var s = defaultValue ? adapter.getOnTitle(ctx) : adapter.getOffTitle(ctx);
++                        yield getString(R.string.aep_dvr_compat_config_hardening_opt_out,
++                                s.toString(), getSettingPath(R.string.safety_center_title,
++                                                  R.string.more_security_privacy_settings));
++                    }
++                    case AppSwitch.DVR_APP_IS_CLIENT_OF_GMSCORE -> {
++                        var s = defaultValue ? adapter.getOnTitle(ctx) : adapter.getOffTitle(ctx);
++                        yield getString(R.string.aep_dvr_app_is_client_of_gmscore, s.toString());
++                    }
++                    default -> null;
++                };
++            }
++            def.summary = summary;
++        }
++
++        var enabled = createEntry(ID_ON, adapter.getOnTitle(ctx));
++        enabled.isChecked = !isDefault && state;
++        enabled.isEnabled = enabled.isChecked || !isImmutable;
++
++        var disabled = createEntry(ID_OFF, adapter.getOffTitle(ctx));
++        disabled.isChecked = !isDefault && !state;
++        disabled.isEnabled = disabled.isChecked || !isImmutable;
++
++        if (isImmutable) {
++            int immutabilityReason = si.getImmutabilityReason();
++            CharSequence summary = getSummaryForImmutabilityReason(immutabilityReason);
++            if (summary == null) {
++                if (immutabilityReason == AppSwitch.IR_EXPLOIT_PROTECTION_COMPAT_MODE) {
++                    summary = getString(R.string.aep_ir_exploit_protection_compat_mode,
++                            getString(R.string.aep_compat_mode_title));
++                }
++            }
++            if (enabled.isChecked) {
++                enabled.summary = summary;
++            }
++            if (disabled.isChecked) {
++                disabled.summary = summary;
++            }
++        }
++
++        if (notifTogglePref != null) {
++            notifTogglePref.isChecked = adapter.getAppSwitch().isNotificationEnabled(ps);
++            notifTogglePref.isEnabled = state;
++        }
++
++        return new Entry[] { def, enabled, disabled };
++    }
++
++    private String getAppDefaultSettingPathForCategory(AswAdapter.Category category) {
++        switch (category) {
++            case ExploitProtection:
++                return getSettingPath(R.string.safety_center_title, R.string.exploit_protection_settings);
++            default:
++                throw new IllegalArgumentException(category.toString());
++        }
++    }
++
++    private String getSettingPath(int... parts) {
++        var sb = new StringBuilder();
++        for (int i = 0; i < parts.length; ++i) {
++            if (i != 0) {
++                sb.append(" > ");
++            }
++            sb.append(getString(parts[i]));
++        }
++        return sb.toString();
++    }
++
++    @Nullable
++    protected CharSequence getSummaryForDefaultValueReason(int dvr) {
++        return null;
++    }
++
++    @Nullable
++    protected CharSequence getSummaryForImmutabilityReason(int ir) {
++        return null;
++    }
++
++    @Override
++    protected List<PrefModel> getExtraPrefModels() {
++        return extraPrefs;
++    }
++
++    @Override
++    public final void onEntrySelected(int id) {
++        Context ctx = requireContext();
++        AppSwitch asw = adapter.getAppSwitch();
++        int userId = mUserId;
++        String pkgName = mPackageName;
++        GosPackageState ps = GosPackageState.get(pkgName, userId);
++        ApplicationInfo appInfo = getAppInfo();
++
++        boolean isImmutable = asw.isImmutable(ctx, userId, appInfo, ps);
++
++        if (isImmutable) {
++            return;
++        }
++
++        Runnable r = () -> {
++            GosPackageState.Editor ed = GosPackageState.edit(pkgName, userId);
++
++            switch (id) {
++                case ID_DEFAULT -> asw.setUseDefaultValue(ed);
++                case ID_ON, ID_OFF -> asw.set(ed, id == ID_ON);
++                default -> throw new IllegalStateException();
++            }
++
++            ed.setKillUidAfterApply(shouldKillUidAfterChange());
++
++            if (!ed.apply()) {
++                finish();
++            }
++
++            if (!refreshUi()) {
++                setIntentAndFinish(true);
++            }
++        };
++
++        completeStateChange(id, asw.get(ctx, userId, appInfo, ps), r);
++    }
++
++    protected void completeStateChange(int newEntryId, boolean curValue, Runnable stateChangeAction) {
++        stateChangeAction.run();
++    }
++
++    protected boolean shouldKillUidAfterChange() {
++        return true;
++    }
++}
+diff --git a/src/com/android/settings/applications/AswAppListPrefController.java b/src/com/android/settings/applications/AswAppListPrefController.java
+new file mode 100644
+index 0000000000..c6d9fa7260
+--- /dev/null
++++ b/src/com/android/settings/applications/AswAppListPrefController.java
+@@ -0,0 +1,27 @@
++package com.android.settings.applications;
++
++import android.content.Context;
++
++import androidx.preference.Preference;
++
++import com.android.settings.applications.AswAdapter;
++import com.android.settings.core.BasePreferenceController;
++
++public abstract class AswAppListPrefController extends BasePreferenceController {
++
++    protected final AswAdapter aswAdapter;
++
++    public AswAppListPrefController(Context context, String preferenceKey, AswAdapter adapter) {
++        super(context, preferenceKey);
++        aswAdapter = adapter;
++    }
++
++    @Override
++    public boolean handlePreferenceTreeClick(Preference preference) {
++        if (!getPreferenceKey().equals(preference.getKey())) {
++            return false;
++        }
++        aswAdapter.openAppListPage(preference.getContext());
++        return true;
++    }
++}
+diff --git a/src/com/android/settings/applications/AswExploitProtectionFragment.java b/src/com/android/settings/applications/AswExploitProtectionFragment.java
+new file mode 100644
+index 0000000000..19d0a47043
+--- /dev/null
++++ b/src/com/android/settings/applications/AswExploitProtectionFragment.java
+@@ -0,0 +1,44 @@
++package com.android.settings.applications;
++
++import android.content.Context;
++import android.content.pm.GosPackageState;
++import android.ext.settings.app.AppSwitch;
++
++import androidx.appcompat.app.AlertDialog;
++
++import com.android.settings.R;
++
++public abstract class AswExploitProtectionFragment<T extends AppSwitch> extends AswAppInfoFragment<T> {
++
++    @Override
++    protected void completeStateChange(int newEntryId, boolean curValue, Runnable stateChangeAction) {
++        Context ctx = requireContext();
++
++        boolean showWarning = false;
++        if (curValue) {
++            if (newEntryId == ID_OFF) {
++                showWarning = true;
++            } else if (newEntryId == ID_DEFAULT) {
++                AppSwitch asw = adapter.getAppSwitch();
++                int userId = mUserId;
++                var ps = GosPackageState.get(mPackageName, userId);
++                showWarning = !asw.getDefaultValue(ctx, userId, getAppInfo(), ps);
++            }
++        }
++        if (showWarning) {
++            var d = getExploitProtectionWarningOnDisable(ctx, stateChangeAction);
++            d.show();
++        } else {
++            stateChangeAction.run();
++        }
++    }
++
++    public static AlertDialog.Builder getExploitProtectionWarningOnDisable(Context ctx, Runnable action) {
++        var b = new AlertDialog.Builder(ctx);
++        b.setTitle(R.string.aep_confirm_disable_title);
++        b.setMessage(R.string.aep_confirm_disable_warning_msg);
++        b.setNegativeButton(R.string.cancel, null);
++        b.setPositiveButton(R.string.aep_confirm_disable_proceed_btn, (d, w) -> action.run());
++        return b;
++    }
++}
+diff --git a/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt b/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt
+index b0990c18a4..8f91031255 100644
+--- a/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt
++++ b/src/com/android/settings/spa/app/appinfo/AppInfoSettings.kt
+@@ -51,6 +51,7 @@ import com.android.settings.spa.app.specialaccess.UsageDataAppListProvider
+ import com.android.settings.spa.app.specialaccess.WriteSystemPreferencesAppListProvider
+ import com.android.settings.utils.HsuUtils
+ import com.android.settingslib.spa.framework.common.SettingsPageProvider
++import com.android.settingslib.spa.framework.compose.LifecycleEffect
+ import com.android.settingslib.spa.framework.compose.navigator
+ import com.android.settingslib.spa.widget.scaffold.RegularScaffold
+ import com.android.settingslib.spa.widget.ui.Category
+@@ -126,6 +127,8 @@ object AppInfoSettingsProvider : SettingsPageProvider {
+ 
+ @Composable
+ private fun AppInfoSettings(packageInfoPresenter: PackageInfoPresenter) {
++    // needed to refresh AppSwitch items after returning from their fragments
++    LifecycleEffect(onStart = { check(packageInfoPresenter.manualRefreshFlow.tryEmit(Any())) })
+     val packageInfoState = packageInfoPresenter.flow.collectAsStateWithLifecycle()
+     val context = LocalContext.current
+     RegularScaffold(
+diff --git a/src/com/android/settings/spa/app/appinfo/AswAppList.kt b/src/com/android/settings/spa/app/appinfo/AswAppList.kt
+new file mode 100644
+index 0000000000..c08586a700
+--- /dev/null
++++ b/src/com/android/settings/spa/app/appinfo/AswAppList.kt
+@@ -0,0 +1,101 @@
++package com.android.settings.spa.app.appinfo
++
++import android.content.Context
++import android.content.pm.ApplicationInfo
++import android.content.pm.GosPackageState
++import android.os.Bundle
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.platform.LocalContext
++import com.android.settings.applications.AswAdapter
++import com.android.settingslib.spa.framework.common.SettingsPageProvider
++import com.android.settingslib.spa.framework.compose.rememberContext
++import com.android.settingslib.spa.framework.util.asyncFilter
++import com.android.settingslib.spa.framework.util.asyncMap
++import com.android.settingslib.spa.widget.ui.SpinnerOption
++import com.android.settingslib.spaprivileged.model.app.AppListModel
++import com.android.settingslib.spaprivileged.model.app.AppRecord
++import com.android.settingslib.spaprivileged.template.app.AppListItem
++import com.android.settingslib.spaprivileged.template.app.AppListItemModel
++import com.android.settingslib.spaprivileged.template.app.AppListPage
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.combine
++
++open class AswAppListPageProvider(val adapter: AswAdapter<*>) : SettingsPageProvider {
++    override val name = adapter.getAppListPageProviderName()
++
++    @Composable
++    override fun Page(arguments: Bundle?) {
++        AswAppListPage(adapter)
++    }
++}
++
++@Composable
++fun AswAppListPage(adapter: AswAdapter<*>) {
++    AppListPage(
++        title = rememberContext { ctx ->
++            adapter.getShortAswTitle(ctx).toString()
++        },
++        listModel = rememberContext { ctx ->
++            AswAppListModel(ctx, adapter)
++        },
++    )
++}
++
++class AppRecordImpl(override val app: ApplicationInfo, val gosPackageState: GosPackageState) : AppRecord
++
++class AswAppListModel(val ctx: Context, val adapter: AswAdapter<*>) : AppListModel<AppRecordImpl> {
++    companion object {
++        const val SPINNER_OPTION_OFF = 0
++        const val SPINNER_OPTION_ON = 1
++    }
++
++    override fun getSpinnerOptions(recordList: List<AppRecordImpl>): List<SpinnerOption> {
++        val options = ArrayList<SpinnerOption>(2)
++        options.add(SpinnerOption(SPINNER_OPTION_OFF, adapter.getOffTitle(ctx).toString()))
++        options.add(SpinnerOption(SPINNER_OPTION_ON, adapter.getOnTitle(ctx).toString()))
++        return options
++    }
++
++    override fun transform(
++        userIdFlow: Flow<Int>,
++        appListFlow: Flow<List<ApplicationInfo>>
++    ): Flow<List<AppRecordImpl>> {
++        return userIdFlow.combine(appListFlow) { userId, appList ->
++            appList.asyncMap { app ->
++                val gosPs = GosPackageState.get(app.packageName, userId)
++                if (adapter.shouldIncludeInAppListPage(app, gosPs)) {
++                    AppRecordImpl(app, GosPackageState.get(app.packageName, userId))
++                } else {
++                    null
++                }
++            }.filterNotNull()
++        }
++    }
++
++    override fun filter(
++        userIdFlow: Flow<Int>,
++        option: Int,
++        recordListFlow: Flow<List<AppRecordImpl>>
++    ): Flow<List<AppRecordImpl>> {
++        val appSwitch = adapter.getAppSwitch()
++        return userIdFlow.combine(recordListFlow) { userId, recordList ->
++            recordList.asyncFilter {
++                val value = appSwitch.get(ctx, userId, it.app, it.gosPackageState)
++                when (option) {
++                    SPINNER_OPTION_OFF -> !value
++                    SPINNER_OPTION_ON -> value
++                    else -> throw IllegalArgumentException(option.toString())
++                }
++            }
++        }
++    }
++
++    @Composable
++    override fun AppListItemModel<AppRecordImpl>.AppItem() {
++        val context = LocalContext.current
++        AppListItem(onClick = {
++            adapter.openAppPage(context, record.app)
++        })
++    }
++}
++
+diff --git a/src/com/android/settings/spa/app/appinfo/AswPreference.kt b/src/com/android/settings/spa/app/appinfo/AswPreference.kt
+new file mode 100644
+index 0000000000..116fa04702
+--- /dev/null
++++ b/src/com/android/settings/spa/app/appinfo/AswPreference.kt
+@@ -0,0 +1,27 @@
++package com.android.settings.spa.app.appinfo
++
++import android.content.Context
++import android.content.pm.ApplicationInfo
++import android.ext.settings.app.AppSwitch
++import androidx.compose.runtime.Composable
++import com.android.settings.applications.AswAdapter
++import com.android.settingslib.spa.widget.preference.Preference
++import com.android.settingslib.spa.widget.preference.PreferenceModel
++import com.android.settingslib.spaprivileged.model.app.installed
++
++@Composable
++fun AswPreference(context: Context, app: ApplicationInfo, adapter: AswAdapter<out AppSwitch>) {
++    if (!app.installed) {
++        return
++    }
++
++    Preference(object : PreferenceModel {
++        override val title = adapter.getAswTitle(context).toString()
++        override val summary = {
++            adapter.getPreferenceSummary(context, app).toString()
++        }
++        override val onClick = {
++            adapter.openAppPage(context, app)
++        }
++    })
++}
+diff --git a/src/com/android/settings/spa/app/appinfo/PackageInfoPresenter.kt b/src/com/android/settings/spa/app/appinfo/PackageInfoPresenter.kt
+index 4e2bb59534..0304b9f490 100644
+--- a/src/com/android/settings/spa/app/appinfo/PackageInfoPresenter.kt
++++ b/src/com/android/settings/spa/app/appinfo/PackageInfoPresenter.kt
+@@ -40,6 +40,7 @@ import com.android.settingslib.spaprivileged.model.app.IPackageManagers
+ import com.android.settingslib.spaprivileged.model.app.PackageManagers
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.SharingStarted
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.filter
+@@ -94,8 +95,10 @@ class PackageInfoPresenter(
+         intent.action != Intent.ACTION_PACKAGE_REMOVED ||
+             intent.getBooleanExtra(Intent.EXTRA_ARCHIVAL, false)
+ 
++    val manualRefreshFlow = MutableStateFlow<Any?>(null)
++
+     val flow: StateFlow<PackageInfo?> =
+-        merge(flowOf(null), appChangeFlow)
++        merge(flowOf(null), appChangeFlow, manualRefreshFlow)
+             .map { getPackageInfo() }
+             .stateIn(coroutineScope + Dispatchers.Default, SharingStarted.Eagerly, null)
+ 

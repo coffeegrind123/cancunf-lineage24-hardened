@@ -1,0 +1,26 @@
+From 676db4c28848e8212ccd4c6d3bc98da7287eabe3 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Wed, 26 Feb 2025 12:14:37 +0200
+Subject: [PATCH 60/67] add getter for PackageManagerService.mContext
+
+(cherry picked from commit 94220f895f2db1d4f7340914f8b9d51c7d40c8c5)
+---
+ .../java/com/android/server/pm/PackageManagerService.java    | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/services/core/java/com/android/server/pm/PackageManagerService.java b/services/core/java/com/android/server/pm/PackageManagerService.java
+index a6ffc00588..d2d434c57f 100644
+--- a/services/core/java/com/android/server/pm/PackageManagerService.java
++++ b/services/core/java/com/android/server/pm/PackageManagerService.java
+@@ -8885,6 +8885,11 @@ public class PackageManagerService implements PackageSender, TestUtilityService
+         return sRestrictedPermissions;
+     }
+ 
++    @NonNull
++    public Context getContext() {
++        return mContext;
++    }
++
+     @Nullable
+     String getDeveloperVerificationPolicyDelegatePackageName() {
+         return mDeveloperVerificationPolicyDelegatePackage;

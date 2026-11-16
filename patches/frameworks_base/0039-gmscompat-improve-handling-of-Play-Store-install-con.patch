@@ -1,0 +1,90 @@
+From 1b8277f6bf060df8ca23dce0770d3f4b6c3a39e5 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 13 Oct 2026 13:19:57 +0000
+Subject: [PATCH 39/67] gmscompat: improve handling of Play Store install
+ confirmation dialogs
+
+This change together with the corresponding GmsCompat app change fixes "action required"
+notification not being removed after Play Store process death.
+
+(cherry picked from commit 12764b47b6d074f1946568fde11b8a4c81cdd26d)
+---
+ .../android/internal/gmscompat/IGms2Gca.aidl  |  2 +-
+ .../internal/gmscompat/PlayStoreHooks.java    | 37 +++++++++++++++++++
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/com/android/internal/gmscompat/IGms2Gca.aidl b/core/java/com/android/internal/gmscompat/IGms2Gca.aidl
+index e9aa9024b2..a0b5363fd0 100644
+--- a/core/java/com/android/internal/gmscompat/IGms2Gca.aidl
++++ b/core/java/com/android/internal/gmscompat/IGms2Gca.aidl
+@@ -15,7 +15,7 @@ interface IGms2Gca {
+ 
+     @nullable BinderDef maybeGetBinderDef(String callerPkg, int processState, String ifaceName);
+ 
+-    oneway void onPlayStorePendingUserAction(in Intent actionIntent, @nullable String pkgName);
++    void onPlayStorePendingUserAction(in Intent actionIntent, @nullable String pkgName);
+     @nullable Intent maybeGetPlayStorePendingUserActionIntent();
+ 
+     oneway void showPlayStoreMissingObbPermissionNotification();
+diff --git a/core/java/com/android/internal/gmscompat/PlayStoreHooks.java b/core/java/com/android/internal/gmscompat/PlayStoreHooks.java
+index cd66f038d0..e92cd7935d 100644
+--- a/core/java/com/android/internal/gmscompat/PlayStoreHooks.java
++++ b/core/java/com/android/internal/gmscompat/PlayStoreHooks.java
+@@ -74,6 +74,7 @@ public final class PlayStoreHooks {
+         Context ctx = GmsCompat.appContext();
+         packageManager = ctx.getPackageManager();
+         InternalBroadcastReceiver.register(ctx);
++        PendingUserActionListener.register(ctx);
+     }
+ 
+     // PackageInstaller.Session#commit(IntentSender)
+@@ -82,6 +83,41 @@ public final class PlayStoreHooks {
+                 .getIntentSender();
+     }
+ 
++    static class PendingUserActionListener extends BroadcastReceiver {
++        private static final String TAG = "GmcPendingUserActionListener";
++        private static final String INTENT_ACTION = PendingUserActionListener.class.getName();
++
++        private PendingUserActionListener() {}
++
++        static void register(Context appContext) {
++            appContext.registerReceiver(new PendingUserActionListener(),
++                    new IntentFilter(INTENT_ACTION), Context.RECEIVER_NOT_EXPORTED);
++        }
++
++        static void onNewPendingUserAction(Context appContext) {
++            Log.i(TAG, "onNewPendingUserAction");
++            var intent = new Intent(INTENT_ACTION);
++            intent.setPackage(appContext.getPackageName());
++            appContext.sendBroadcast(intent);
++        }
++
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            Log.i(TAG, "onReceive in " + Application.getProcessName());
++            Activity activity = GmcActivityUtils.getMostRecentVisibleActivity();
++            if (activity == null) {
++                Log.i(TAG, "no visible activity");
++                return;
++            }
++            Intent pendingActionIntent = GmsCompatApp.call(i -> i.maybeGetPlayStorePendingUserActionIntent());
++            if (pendingActionIntent == null) {
++                Log.i(TAG, "no pendingActionIntent");
++                return;
++            }
++            activity.startActivity(pendingActionIntent);
++        }
++    }
++
+     public static void onActivityResumed(Activity activity) {
+         Intent pendingActionIntent = GmsCompatApp.call(i -> i.maybeGetPlayStorePendingUserActionIntent());
+         if (pendingActionIntent != null) {
+@@ -137,6 +173,7 @@ public final class PlayStoreHooks {
+ 
+                 String packageName_ = packageName;
+                 GmsCompatApp.voidCall(i -> i.onPlayStorePendingUserAction(confirmationIntent, packageName_));
++                PendingUserActionListener.onNewPendingUserAction(context);
+ 
+                 // confirmationIntent has a PendingIntent to this instance, don't unregister yet
+                 return;

@@ -20,6 +20,28 @@ declare -A PATHS=(
     [build_soong]=build/soong
     [packages_apps_DisplayFeatures]=packages/apps/DisplayFeatures
     [packages_apps_Updater]=packages/apps/Updater
+    # GmsCompat port (docs/06-gmscompat-port.md)
+    [art]=art
+    [bionic]=bionic
+    [frameworks_base]=frameworks/base
+    [frameworks_native]=frameworks/native
+    [frameworks_opt_telephony]=frameworks/opt/telephony
+    [libcore]=libcore
+    [packages_apps_GmsCompat]=packages/apps/GmsCompat
+    [packages_apps_Settings]=packages/apps/Settings
+    [packages_modules_AppSearch]=packages/modules/AppSearch
+    [packages_modules_Bluetooth]=packages/modules/Bluetooth
+    [packages_modules_ConfigInfrastructure]=packages/modules/ConfigInfrastructure
+    [packages_modules_Connectivity]=packages/modules/Connectivity
+    [packages_modules_Nfc]=packages/modules/Nfc
+    [packages_modules_Permission]=packages/modules/Permission
+    [packages_modules_StatsD]=packages/modules/StatsD
+    [packages_modules_Wifi]=packages/modules/Wifi
+    [packages_providers_DownloadProvider]=packages/providers/DownloadProvider
+    [packages_providers_TelephonyProvider]=packages/providers/TelephonyProvider
+    [system_sepolicy]=system/sepolicy
+    [system_tools_aidl]=system/tools/aidl
+    [tools_metalava]=tools/metalava
 )
 
 # Binary edits to vendor blobs. They can't ship as patches because this repo

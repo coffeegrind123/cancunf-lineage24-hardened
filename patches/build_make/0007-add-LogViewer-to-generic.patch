@@ -1,0 +1,22 @@
+From a050fdc502f443a0973095d7bc5b7141f8a24e45 Mon Sep 17 00:00:00 2001
+From: Daniel Micay <daniel.micay@grapheneos.org>
+Date: Tue, 20 Oct 2026 13:11:48 -0400
+Subject: [PATCH 7/7] add LogViewer to generic
+
+(cherry picked from commit 1a40f526c271998875517132499c2414eac60aa7)
+---
+ target/product/generic/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/product/generic/Android.bp b/target/product/generic/Android.bp
+index 73096ba3f..15c160467 100644
+--- a/target/product/generic/Android.bp
++++ b/target/product/generic/Android.bp
+@@ -856,6 +856,7 @@ system_image_defaults {
+                 "KeyChain", // handheld_system
+                 "LiveWallpapersPicker", // generic_system, full_base
+                 "LocalTransport", // base_system
++                "LogViewer", // handheld_system
+                 "ManagedProvisioning", // handheld_system
+                 "MmsService", // handheld_system
+                 "MtpService", // handheld_system

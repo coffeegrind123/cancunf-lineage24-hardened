@@ -1,0 +1,47 @@
+From ef7d8f247be95fce004a0de863d33fb9f2be70ac Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Sat, 6 Jun 2026 17:34:21 +0000
+Subject: [PATCH 29/67] add a method to check for Play Store APK source stamp
+
+(cherry picked from commit 35c592d840642ee9591a9737e6ae41a22c5c5827)
+---
+ .../android/content/pm/ApplicationInfo.java   | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/core/java/android/content/pm/ApplicationInfo.java b/core/java/android/content/pm/ApplicationInfo.java
+index dca8908935..57af3320ff 100644
+--- a/core/java/android/content/pm/ApplicationInfo.java
++++ b/core/java/android/content/pm/ApplicationInfo.java
+@@ -3221,4 +3221,32 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable {
+     public @NonNull AppInfoExt ext() {
+         return ext;
+     }
++
++    private static volatile Boolean hasPlayStoreSourceStamp;
++
++    /** @hide */
++    public boolean hasPlayStoreSourceStamp() {
++        Boolean cache = hasPlayStoreSourceStamp;
++        if (cache != null) {
++            return cache.booleanValue();
++        }
++
++        var apkPaths = new ArrayList<String>();
++        apkPaths.add(Objects.requireNonNull(sourceDir));
++        String[] splits = splitSourceDirs;
++        if (splits != null) {
++            for (String splitPath : splits) {
++                apkPaths.add(Objects.requireNonNull(splitPath));
++            }
++        }
++        byte[] playStoreSourceStampCertDigest = java.util.HexFormat.of().parseHex(
++                "3257d599a49d2c961a471ca9843f59d341a405884583fc087df4237b733bbd6d");
++        boolean result = android.util.apk.SourceStampVerifier
++                .verify(apkPaths, /* requiredSourceStamp */ playStoreSourceStampCertDigest)
++                .isVerified();
++        hasPlayStoreSourceStamp = Boolean.valueOf(result);
++        android.util.Log.d("PlayStoreSourceStampCheck",
++                "result for " + packageName + ": " + result);
++        return result;
++    }
+ }

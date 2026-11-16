@@ -1,0 +1,23 @@
+From d58ddb24189597ed658f22d13c628501cef174e4 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Sun, 20 Oct 2024 17:26:22 +0300
+Subject: [PATCH 2/2] gmscompat: enable "send DHCP hostname" option in Android
+ Auto by default
+
+(cherry picked from commit 50035128833893a0390c748179eabbcb999fae95)
+---
+ framework/java/android/net/wifi/WifiConfiguration.java | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/framework/java/android/net/wifi/WifiConfiguration.java b/framework/java/android/net/wifi/WifiConfiguration.java
+index 240e071480..89d98ce697 100644
+--- a/framework/java/android/net/wifi/WifiConfiguration.java
++++ b/framework/java/android/net/wifi/WifiConfiguration.java
+@@ -3422,6 +3422,7 @@ public class WifiConfiguration implements Parcelable {
+             // Per-connection MAC randomization doesn't work with some cars, see
+             // https://github.com/GrapheneOS/os-issue-tracker/issues/4139
+             macRandomizationSetting = RANDOMIZATION_PERSISTENT;
++            mIsSendDhcpHostnameEnabled = true;
+         }
+         mCreatorUserId = -2; // Same as UserHandle.USER_CURRENT
+     }

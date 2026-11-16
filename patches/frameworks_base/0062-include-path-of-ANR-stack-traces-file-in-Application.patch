@@ -1,0 +1,133 @@
+From 42d3db273c4fad5d1755d5a1bd767683eca383ef Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 7 Oct 2024 18:59:24 +0300
+Subject: [PATCH 62/67] include path of ANR stack traces file in
+ ApplicationErrorReport
+
+ANR stack traces file contains stack traces of all app's threads and of all threads of relevant or
+possibly relevant system processes, such as system_server.
+
+(cherry picked from commit e1861ba17ac3c101f33003617ed62d69cd9f8e9e)
+---
+ core/java/android/app/ActivityManager.java               | 6 ++++++
+ core/java/android/app/ApplicationErrorReport.java        | 7 +++++++
+ services/core/java/com/android/server/am/AppErrors.java  | 1 +
+ .../com/android/server/am/ProcessErrorStateRecord.java   | 9 +++++++--
+ 4 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/core/java/android/app/ActivityManager.java b/core/java/android/app/ActivityManager.java
+index 038dfdee09..596189ed3b 100644
+--- a/core/java/android/app/ActivityManager.java
++++ b/core/java/android/app/ActivityManager.java
+@@ -3966,6 +3966,10 @@ public class ActivityManager {
+          */
+         public byte[] crashData = null;
+ 
++        /** @hide */
++        @Nullable
++        public String tracesFilePath;
++
+         public ProcessErrorStateInfo() {
+         }
+ 
+@@ -3984,6 +3988,7 @@ public class ActivityManager {
+             dest.writeString(shortMsg);
+             dest.writeString(longMsg);
+             dest.writeString(stackTrace);
++            dest.writeString(tracesFilePath);
+         }
+ 
+         public void readFromParcel(Parcel source) {
+@@ -3995,6 +4000,7 @@ public class ActivityManager {
+             shortMsg = source.readString();
+             longMsg = source.readString();
+             stackTrace = source.readString();
++            tracesFilePath = source.readString();
+         }
+ 
+         public static final @android.annotation.NonNull Creator<ProcessErrorStateInfo> CREATOR =
+diff --git a/core/java/android/app/ApplicationErrorReport.java b/core/java/android/app/ApplicationErrorReport.java
+index 691e96c2d8..c2853a789b 100644
+--- a/core/java/android/app/ApplicationErrorReport.java
++++ b/core/java/android/app/ApplicationErrorReport.java
+@@ -16,6 +16,7 @@
+ 
+ package android.app;
+ 
++import android.annotation.Nullable;
+ import android.content.ComponentName;
+ import android.content.Context;
+ import android.content.Intent;
+@@ -574,6 +575,10 @@ public class ApplicationErrorReport implements Parcelable {
+          */
+         public String info;
+ 
++        /** @hide */
++        @Nullable
++        public String tracesFilePath;
++
+         /**
+          * Create an uninitialized instance of AnrInfo.
+          */
+@@ -587,6 +592,7 @@ public class ApplicationErrorReport implements Parcelable {
+             activity = in.readString();
+             cause = in.readString();
+             info = in.readString();
++            tracesFilePath = in.readString();
+         }
+ 
+         /**
+@@ -596,6 +602,7 @@ public class ApplicationErrorReport implements Parcelable {
+             dest.writeString(activity);
+             dest.writeString(cause);
+             dest.writeString(info);
++            dest.writeString(tracesFilePath);
+         }
+ 
+         /**
+diff --git a/services/core/java/com/android/server/am/AppErrors.java b/services/core/java/com/android/server/am/AppErrors.java
+index 7dc3c00e97..8d77903aa4 100644
+--- a/services/core/java/com/android/server/am/AppErrors.java
++++ b/services/core/java/com/android/server/am/AppErrors.java
+@@ -911,6 +911,7 @@ class AppErrors {
+             report.anrInfo.activity = anrReport.tag;
+             report.anrInfo.cause = anrReport.shortMsg;
+             report.anrInfo.info = anrReport.longMsg;
++            report.anrInfo.tracesFilePath = anrReport.tracesFilePath;
+         }
+ 
+         return report;
+diff --git a/services/core/java/com/android/server/am/ProcessErrorStateRecord.java b/services/core/java/com/android/server/am/ProcessErrorStateRecord.java
+index 12186f9117..d0ea6ae77f 100644
+--- a/services/core/java/com/android/server/am/ProcessErrorStateRecord.java
++++ b/services/core/java/com/android/server/am/ProcessErrorStateRecord.java
+@@ -793,7 +793,7 @@ class ProcessErrorStateRecord {
+             synchronized (mProcLock) {
+                 // Set the app's notResponding state, and look up the errorReportReceiver
+                 makeAppNotRespondingLSP(activityShortComponentName,
+-                        annotation != null ? "ANR " + annotation : "ANR", info.toString());
++                        annotation != null ? "ANR " + annotation : "ANR", info.toString(), tracesFile);
+                 mDialogController.setAnrController(anrController);
+             }
+ 
+@@ -832,7 +832,7 @@ class ProcessErrorStateRecord {
+     }
+ 
+     @GuardedBy({"mService", "mProcLock"})
+-    private void makeAppNotRespondingLSP(String activity, String shortMsg, String longMsg) {
++    private void makeAppNotRespondingLSP(String activity, String shortMsg, String longMsg, @Nullable File tracesFile) {
+         setNotResponding(true);
+         // mAppErrors can be null if the AMS is constructed with injector only. This will only
+         // happen in tests.
+@@ -840,6 +840,11 @@ class ProcessErrorStateRecord {
+             mNotRespondingReport = mService.mAppErrors.generateProcessError(mApp,
+                     ActivityManager.ProcessErrorStateInfo.NOT_RESPONDING,
+                     activity, shortMsg, longMsg, null);
++            // Filename of tracesFile contains ANR timestamp with millisecond precision, it's highly
++            // unlikely to be reused
++            if (tracesFile != null) {
++                mNotRespondingReport.tracesFilePath = tracesFile.getAbsolutePath();
++            }
+         }
+         startAppProblemLSP();
+         mApp.getWindowProcessController().stopFreezingActivities();
