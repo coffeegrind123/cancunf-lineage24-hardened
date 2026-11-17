@@ -17,6 +17,8 @@
   <project path="packages/apps/GmsCompat"           name="platform_packages_apps_GmsCompat"       remote="grapheneos" revision="17" />
   <project path="packages/apps/AppCompatConfig"     name="platform_packages_apps_AppCompatConfig" remote="grapheneos" revision="17" />
   <project path="packages/apps/LogViewer"           name="platform_packages_apps_LogViewer"       remote="grapheneos" revision="17" />
+  <!-- GrapheneOS network location provider (docs/05-plan.md, Location). -->
+  <project path="packages/apps/NetworkLocation"     name="platform_packages_apps_NetworkLocation" remote="grapheneos" revision="17" />
   <project path="external/GmsCompatConfig"          name="platform_external_GmsCompatConfig"      remote="grapheneos" revision="17" clone-depth="1" />
   <project path="external/AppCompatConfig"          name="platform_external_AppCompatConfig"      remote="grapheneos" revision="17" clone-depth="1" />
 </manifest>

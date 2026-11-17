@@ -42,6 +42,8 @@ declare -A PATHS=(
     [system_sepolicy]=system/sepolicy
     [system_tools_aidl]=system/tools/aidl
     [tools_metalava]=tools/metalava
+    # Location port (docs/06-gmscompat-port.md, Location)
+    [vendor_lineage]=vendor/lineage
 )
 
 # Binary edits to vendor blobs. They can't ship as patches because this repo

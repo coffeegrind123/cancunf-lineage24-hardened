@@ -1,0 +1,244 @@
+From 84eed851bcfa87b692bc5c2bf358c72a65d01778 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 2 May 2023 18:39:28 +0300
+Subject: [PATCH 69/78] add GNSS PSDS setting
+
+Adapted: LineageOS gates PSDS downloads with its own Assisted GPS switch
+(Settings.Global.ASSISTED_GPS_ENABLED). Both are kept: PSDS is
+downloaded only when Assisted GPS is on and this setting is not
+disabled; this setting chooses the server.
+
+(cherry picked from commit f47b691b976938f7dfa026c55cdadc3508709703)
+Change-Id: Idc2c72366018da7a634dfdb9bcfc4699ea1606ec
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../android/ext/settings/GnssSettings.java    | 19 +++++
+ core/java/android/provider/Settings.java      |  4 +
+ core/res/res/values/config.xml                |  3 +
+ core/res/res/values/public-ext.xml            |  2 +
+ .../location/gnss/GnssConfiguration.java      | 76 +++++++++++++++++++
+ .../location/gnss/GnssLocationProvider.java   | 23 +++++-
+ 6 files changed, 126 insertions(+), 1 deletion(-)
+
+diff --git a/core/java/android/ext/settings/GnssSettings.java b/core/java/android/ext/settings/GnssSettings.java
+index 0cea9ccbeb..c380bc36f3 100644
+--- a/core/java/android/ext/settings/GnssSettings.java
++++ b/core/java/android/ext/settings/GnssSettings.java
+@@ -1,5 +1,6 @@
+ package android.ext.settings;
+ 
++import android.content.Context;
+ import android.provider.Settings;
+ 
+ /** @hide */
+@@ -15,4 +16,22 @@ public class GnssSettings {
+             SUPL_SERVER_STANDARD, SUPL_DISABLED, SUPL_SERVER_GRAPHENEOS_PROXY // valid values
+     );
+ 
++    // keep in sync with bionic/libc/bionic/gnss_psds_setting.c
++    public static final int PSDS_SERVER_GRAPHENEOS = 0;
++    public static final int PSDS_SERVER_STANDARD = 1;
++    public static final int PSDS_DISABLED = 2;
++
++    public static final IntSetting STANDARD_PSDS_SETTING = new IntSetting(
++            Setting.Scope.GLOBAL, Settings.Global.GNSS_PSDS_STANDARD,
++            PSDS_SERVER_GRAPHENEOS, // default
++            PSDS_SERVER_GRAPHENEOS, PSDS_SERVER_STANDARD, PSDS_DISABLED // valid values
++    );
++
++    public static IntSetting getPsdsSetting(Context ctx) {
++        return STANDARD_PSDS_SETTING;
++    }
++
++    public static boolean isStandardPsds(Context ctx) {
++        return getPsdsSetting(ctx) == STANDARD_PSDS_SETTING;
++    }
+ }
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index 0052da04cf..8c06e39ef5 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -14462,6 +14462,10 @@ public final class Settings {
+         @Protected(restrictReads = false, readWrite = KnownSystemPackage.SETTINGS)
+         public static final String GNSS_SUPL = "force_disable_supl"; // historical name
+ 
++        /** @hide */
++        @Protected(restrictReads = false, readWrite = KnownSystemPackage.SETTINGS)
++        public static final String GNSS_PSDS_STANDARD = "psds_server"; // historical name
++
+         // ExtSettings END
+ 
+         // NOTE: If you add new settings here, be sure to add them to
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index a19202ff16..9bdefda6f8 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -7952,6 +7952,9 @@
+     <!-- Action for opening trusted location settings page [CHAR LIMIT=NONE] [DO NOT TRANSLATE] -->
+     <string name="trusted_location_settings_action" translatable="false"></string>
+ 
++
++    <string name="config_gnssPsdsType"></string>
++    <java-symbol type="string" name="config_gnssPsdsType" />
+     <!-- The delay in milliseconds to suppress the toast after the user presses the
+          power button. -->
+     <integer name="config_turnOffTvToastSuppressionDelayMs">0</integer>
+diff --git a/core/res/res/values/public-ext.xml b/core/res/res/values/public-ext.xml
+index d969b63cd9..6aafd6bc14 100644
+--- a/core/res/res/values/public-ext.xml
++++ b/core/res/res/values/public-ext.xml
+@@ -19,5 +19,7 @@
+         <public name="config_first_party_app_source_package_name"/>
+         <!-- @hide -->
+         <public name="aerr_show_details"/>
++        <!-- @hide -->
++        <public name="config_gnssPsdsType"/>
+     </staging-public-group>
+ </resources>
+diff --git a/services/core/java/com/android/server/location/gnss/GnssConfiguration.java b/services/core/java/com/android/server/location/gnss/GnssConfiguration.java
+index c1e9419eae..b8cd56bf04 100644
+--- a/services/core/java/com/android/server/location/gnss/GnssConfiguration.java
++++ b/services/core/java/com/android/server/location/gnss/GnssConfiguration.java
+@@ -34,6 +34,8 @@ import libcore.io.IoUtils;
+ import java.io.File;
+ import java.io.FileInputStream;
+ import java.io.IOException;
++import java.net.MalformedURLException;
++import java.net.URL;
+ import java.util.Arrays;
+ import java.util.Collections;
+ import java.util.HashMap;
+@@ -538,5 +540,79 @@ public class GnssConfiguration {
+                 props.setProperty(CONFIG_SUPL_PORT, "7275");
+                 break;
+         }
++
++        applyPsdsConfigOverrides(ctx, props);
++    }
++
++    private static void applyPsdsConfigOverrides(Context ctx, Properties props) {
++        final String psdsType = ctx.getString(com.android.internal.R.string.config_gnssPsdsType);
++        Slog.d(TAG, "PSDS type: " + psdsType);
++
++        final int psdsMode;
++        if (psdsType.isEmpty()) {
++            Slog.e(TAG, "PSDS type is not specified, disabling PSDS");
++            psdsMode = GnssSettings.PSDS_DISABLED;
++        } else {
++            psdsMode = GnssSettings.STANDARD_PSDS_SETTING.get(ctx);
++        }
++
++        switch (psdsMode) {
++            case GnssSettings.PSDS_SERVER_GRAPHENEOS:
++                final String hostname = psdsType + ".psds.grapheneos.org";
++                Slog.d(TAG, "PSDS: using GrapheneOS server " + hostname);
++
++                for (String propName : getPsdsPropNames()) {
++                    String origValue = props.getProperty(propName);
++                    if (TextUtils.isEmpty(origValue)) {
++                        continue;
++                    }
++
++                    final URL origUrl;
++                    try {
++                        origUrl = new URL(origValue);
++                    } catch (MalformedURLException e) {
++                        props.remove(propName);
++                        Slog.e(TAG, "malformed value of " + propName + ": " + origValue, e);
++                        continue;
++                    }
++
++                    final URL url;
++                    try {
++                        url = new URL("https", hostname, origUrl.getFile());
++                    } catch (MalformedURLException e) {
++                        throw new IllegalStateException(e);
++                    }
++                    final String urlString = url.toString();
++                    props.setProperty(propName, urlString);
++                    Slog.d(TAG, "overridden " + propName + " from " + origValue + " to " + urlString);
++                }
++                break;
++            case GnssSettings.PSDS_SERVER_STANDARD:
++                Slog.d(TAG, "PSDS: using the standard servers");
++                break;
++            case GnssSettings.PSDS_DISABLED:
++                Slog.d(TAG, "PSDS is disabled");
++                // a precaution, GnssLocationProvider.mSupportsPsds is set to false when PSDS is
++                // disabled, which should disable PSDS entirely
++                clearPsdsServerProps(props);
++                props.setProperty(CONFIG_ENABLE_PSDS_PERIODIC_DOWNLOAD, "0");
++                break;
++        }
++    }
++
++    private static void clearPsdsServerProps(Properties props) {
++        for (String n : getPsdsPropNames()) {
++            props.remove(n);
++        }
++    }
++
++    private static String[] getPsdsPropNames() {
++        return new String[] {
++                CONFIG_LONGTERM_PSDS_SERVER_1,
++                CONFIG_LONGTERM_PSDS_SERVER_2,
++                CONFIG_LONGTERM_PSDS_SERVER_3,
++                CONFIG_NORMAL_PSDS_SERVER,
++                CONFIG_REALTIME_PSDS_SERVER,
++        };
+     }
+ }
+diff --git a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+index 465291cb33..eb0a7d5e1a 100644
+--- a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
++++ b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+@@ -506,6 +506,18 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+         };
+ 
+         GnssSettings.SUPL_SETTING.registerObserver(mContext, mHandler, suplSettingObserver);
++
++        if (GnssSettings.isStandardPsds(mContext)) {
++            Consumer<IntSetting> psdsSettingObserver = setting -> {
++                Slog.d(TAG, "PSDS setting changed, value: " + setting.get(mContext));
++                if (!isPsdsEnabled()) {
++                    Slog.d(TAG, "PSDS is disabled");
++                }
++                reloadGpsProperties();
++            };
++
++            GnssSettings.STANDARD_PSDS_SETTING.registerObserver(mContext, mHandler, psdsSettingObserver);
++        }
+     }
+ 
+     /** Called when system is ready. */
+@@ -690,7 +702,7 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+     private void onNetworkAvailable() {
+         mNetworkTimeHelper.onNetworkAvailable();
+         // Download only if supported, (prevents an unnecessary on-boot download)
+-        if (mSupportsPsds && isAssistedGpsEnabled()) {
++        if (mSupportsPsds && isAssistedGpsEnabled() && isPsdsEnabled()) {
+             synchronized (mLock) {
+                 for (int psdsType : mPendingDownloadPsdsTypes) {
+                     postWithWakeLockHeld(() -> handleDownloadPsdsData(psdsType));
+@@ -790,6 +802,10 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+             Log.d(TAG, "handleDownloadPsdsData() called when PSDS disabled by system setting");
+             return;
+         }
++        if (!isPsdsEnabled()) {
++            Log.d(TAG, "handleDownloadPsdsData() called when PSDS is disabled");
++            return;
++        }
+         if (!mNetworkConnectivityHandler.isDataNetworkConnected()) {
+             // try again when network is up
+             synchronized (mLock) {
+@@ -1926,4 +1942,9 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+         SystemProperties.set("persist.sys.xtra-daemon.enabled",
+                 Boolean.toString(isAssistedGpsEnabled()));
+     }
++
++    private boolean isPsdsEnabled() {
++        return GnssSettings.isStandardPsds(mContext) &&
++                GnssSettings.STANDARD_PSDS_SETTING.get(mContext) != GnssSettings.PSDS_DISABLED;
++    }
+ }

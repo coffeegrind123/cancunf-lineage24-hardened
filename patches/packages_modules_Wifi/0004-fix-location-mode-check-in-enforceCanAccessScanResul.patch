@@ -1,0 +1,35 @@
+From f2e53f4fafc896ad0cb08888283bcfdf817da2e9 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 25 Feb 2025 11:57:50 +0200
+Subject: [PATCH 4/4] fix location mode check in
+ enforceCanAccessScanResultsForWifiScanner()
+
+isLocationModeEnabled() implicitly requires the INTERACT_ACROSS_USERS permission if binder caller is
+running in a background user.
+
+(cherry picked from commit 64320f62bd06bbb385d1906b56c79a9c24ed1807)
+---
+ .../android/server/wifi/util/WifiPermissionsUtil.java    | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java b/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java
+index e92114cf42..f4067874d9 100644
+--- a/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java
++++ b/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java
+@@ -653,8 +653,15 @@ public class WifiPermissionsUtil {
+             return;
+         }
+ 
++        final boolean isLocationModeEnabled;
++        final long token = Binder.clearCallingIdentity();
++        try {
++            isLocationModeEnabled = isLocationModeEnabled();
++        } finally {
++            Binder.restoreCallingIdentity(token);
++        }
+         // Location mode must be enabled
+-        if (!isLocationModeEnabled()) {
++        if (!isLocationModeEnabled) {
+             if (ignoreLocationSettings) {
+                 mLog.w("Request from " + pkgName + " violated location settings");
+             } else {

@@ -30,7 +30,8 @@
     "platform_external_AppCompatConfig": "8798038",
     "_comment_heads": "graphene/17 head when ported 2026-11-15; GmsCompat-related commits only, see docs/06",
     "platform_packages_apps_LogViewer": "75333e9",
-    "platform_tools_metalava": "1b01bb1a5a"
+    "platform_tools_metalava": "1b01bb1a5a",
+    "platform_packages_apps_NetworkLocation": "474472e"
   },
   "releases": [],
   "kernel": {

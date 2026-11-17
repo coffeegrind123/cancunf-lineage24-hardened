@@ -1,0 +1,22 @@
+From 3c3094f05cfc20aff891dcea970fcc2db4608b46 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 22 Nov 2024 12:47:08 +0200
+Subject: [PATCH 8/9] add NetworkLocation
+
+(cherry picked from commit d29beff2fdec4547642159f519e2c592c516f081)
+---
+ target/product/handheld_system.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/product/handheld_system.mk b/target/product/handheld_system.mk
+index ec2c4791c..6887ce9ea 100644
+--- a/target/product/handheld_system.mk
++++ b/target/product/handheld_system.mk
+@@ -62,6 +62,7 @@ PRODUCT_PACKAGES += \
+     MmsService \
+     MtpService \
+     MusicFX \
++    NetworkLocation \
+     PacProcessor \
+     preinstalled-packages-platform-handheld-system.xml \
+     PrintRecommendationService \

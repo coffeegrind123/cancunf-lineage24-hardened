@@ -1,0 +1,383 @@
+From 655e49b689f572c25adca8b048e86b7aedc6fcee Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Sun, 12 Feb 2023 19:44:07 +0200
+Subject: [PATCH 08/15] add base classes for {Bool,Int}Setting preference
+ controllers
+
+If no customization is needed, BoolSetting base class can be used directly from XML by adding
+settings:boolSettingField="<class name> <BoolSetting field name>"
+to the preference XML definition.
+
+(cherry picked from commit e32073ab2f9361571b728e2a4670367facd9fbe6)
+---
+ res/values/attrs.xml                          |  2 +
+ .../core/PreferenceControllerListHelper.java  |  3 +
+ .../core/PreferenceXmlParserUtils.java        | 12 +++
+ .../ext/BoolSettingPrefController.java        | 98 +++++++++++++++++++
+ .../ext/ExtSettingControllerHelper.java       | 72 ++++++++++++++
+ .../ext/ExtSettingPrefController.java         | 12 +++
+ .../ext/IntSettingPrefController.java         | 62 ++++++++++++
+ 7 files changed, 261 insertions(+)
+ create mode 100644 src/com/android/settings/ext/BoolSettingPrefController.java
+ create mode 100644 src/com/android/settings/ext/ExtSettingControllerHelper.java
+ create mode 100644 src/com/android/settings/ext/ExtSettingPrefController.java
+ create mode 100644 src/com/android/settings/ext/IntSettingPrefController.java
+
+diff --git a/res/values/attrs.xml b/res/values/attrs.xml
+index 589d30b273..061a54100a 100644
+--- a/res/values/attrs.xml
++++ b/res/values/attrs.xml
+@@ -66,6 +66,8 @@
+         <attr name="searchable" format="boolean" />
+         <!-- Classname of a PreferenceController corresponding to the preference -->
+         <attr name="controller" format="string" />
++        <!-- Reference to a BoolSetting. Format: className <space> fieldName -->
++        <attr name="boolSettingField" format="string" />
+         <!-- Customized subtitle if it's an unavailable slice -->
+         <attr name="unavailableSliceSubtitle" format="string" />
+         <!-- Whether or not the preference is for work profile, by default it's false. -->
+diff --git a/src/com/android/settings/core/PreferenceControllerListHelper.java b/src/com/android/settings/core/PreferenceControllerListHelper.java
+index dea8c971c4..f07b374db7 100644
+--- a/src/com/android/settings/core/PreferenceControllerListHelper.java
++++ b/src/com/android/settings/core/PreferenceControllerListHelper.java
+@@ -31,6 +31,7 @@ import androidx.preference.PreferenceManager;
+ import androidx.preference.PreferenceScreen;
+ 
+ import com.android.settings.core.PreferenceXmlParserUtils.MetadataFlag;
++import com.android.settings.ext.BoolSettingPrefController;
+ import com.android.settingslib.core.AbstractPreferenceController;
+ 
+ import org.xmlpull.v1.XmlPullParserException;
+@@ -59,6 +60,7 @@ public class PreferenceControllerListHelper {
+         try {
+             preferenceMetadata = PreferenceXmlParserUtils.extractMetadata(context, xmlResId,
+                     MetadataFlag.FLAG_NEED_KEY | MetadataFlag.FLAG_NEED_PREF_CONTROLLER
++                            | MetadataFlag.FLAG_NEED_BOOL_SETTING_FIELD
+                             | MetadataFlag.FLAG_INCLUDE_PREF_SCREEN  | MetadataFlag.FLAG_FOR_WORK);
+         } catch (IOException | XmlPullParserException e) {
+             Log.e(TAG, "Failed to parse preference xml for getting controllers", e);
+@@ -68,6 +70,7 @@ public class PreferenceControllerListHelper {
+         for (Bundle metadata : preferenceMetadata) {
+             final String controllerName = metadata.getString(METADATA_CONTROLLER);
+             if (TextUtils.isEmpty(controllerName)) {
++                BoolSettingPrefController.maybeAdd(context, metadata, controllers);
+                 continue;
+             }
+             BasePreferenceController controller;
+diff --git a/src/com/android/settings/core/PreferenceXmlParserUtils.java b/src/com/android/settings/core/PreferenceXmlParserUtils.java
+index cf2f9ca179..5d4758deef 100644
+--- a/src/com/android/settings/core/PreferenceXmlParserUtils.java
++++ b/src/com/android/settings/core/PreferenceXmlParserUtils.java
+@@ -65,6 +65,7 @@ public class PreferenceXmlParserUtils {
+             MetadataFlag.FLAG_NEED_KEY,
+             MetadataFlag.FLAG_NEED_PREF_TYPE,
+             MetadataFlag.FLAG_NEED_PREF_CONTROLLER,
++            MetadataFlag.FLAG_NEED_BOOL_SETTING_FIELD,
+             MetadataFlag.FLAG_NEED_PREF_TITLE,
+             MetadataFlag.FLAG_NEED_PREF_SUMMARY,
+             MetadataFlag.FLAG_NEED_PREF_ICON,
+@@ -92,11 +93,14 @@ public class PreferenceXmlParserUtils {
+         int FLAG_FOR_WORK = 1 << 12;
+         int FLAG_NEED_HIGHLIGHTABLE_MENU_KEY = 1 << 13;
+         int FLAG_NEED_USER_RESTRICTION = 1 << 14;
++
++        int FLAG_NEED_BOOL_SETTING_FIELD = 1 << 30;
+     }
+ 
+     public static final String METADATA_PREF_TYPE = "type";
+     public static final String METADATA_KEY = "key";
+     public static final String METADATA_CONTROLLER = "controller";
++    public static final String METADATA_BOOL_SETTING_FIELD = "bool_setting_field";
+     public static final String METADATA_TITLE = "title";
+     public static final String METADATA_SUMMARY = "summary";
+     public static final String METADATA_ICON = "icon";
+@@ -163,6 +167,10 @@ public class PreferenceXmlParserUtils {
+                 preferenceMetadata.putString(METADATA_CONTROLLER,
+                         getController(preferenceAttributes));
+             }
++            if (hasFlag(flags, MetadataFlag.FLAG_NEED_BOOL_SETTING_FIELD)) {
++                preferenceMetadata.putString(METADATA_BOOL_SETTING_FIELD,
++                        getBoolSettingField(preferenceAttributes));
++            }
+             if (hasFlag(flags, MetadataFlag.FLAG_NEED_PREF_TITLE)) {
+                 preferenceMetadata.putString(METADATA_TITLE, getTitle(preferenceAttributes));
+             }
+@@ -231,6 +239,10 @@ public class PreferenceXmlParserUtils {
+         return styledAttributes.getString(R.styleable.Preference_controller);
+     }
+ 
++    private static String getBoolSettingField(TypedArray styledAttributes) {
++        return styledAttributes.getString(R.styleable.Preference_boolSettingField);
++    }
++
+     private static String getHighlightableMenuKey(TypedArray styledAttributes) {
+         return styledAttributes.getString(R.styleable.Preference_highlightableMenuKey);
+     }
+diff --git a/src/com/android/settings/ext/BoolSettingPrefController.java b/src/com/android/settings/ext/BoolSettingPrefController.java
+new file mode 100644
+index 0000000000..1f3bcc770e
+--- /dev/null
++++ b/src/com/android/settings/ext/BoolSettingPrefController.java
+@@ -0,0 +1,98 @@
++/*
++ * Copyright (C) 2022 GrapheneOS
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package com.android.settings.ext;
++
++import android.content.Context;
++import android.ext.settings.BoolSetting;
++import android.os.Bundle;
++import android.os.UserHandle;
++
++import androidx.annotation.NonNull;
++import androidx.lifecycle.LifecycleOwner;
++
++import com.android.settings.core.BasePreferenceController;
++
++import java.lang.reflect.Field;
++import java.util.List;
++import java.util.Objects;
++
++import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_BOOL_SETTING_FIELD;
++import static com.android.settings.core.PreferenceXmlParserUtils.METADATA_KEY;
++
++public class BoolSettingPrefController extends AbstractTogglePrefController
++        implements ExtSettingPrefController<BoolSetting> {
++    private final BoolSetting setting;
++    private final ExtSettingControllerHelper<BoolSetting> helper;
++    protected final UserHandle user;
++
++    public BoolSettingPrefController(Context ctx, String key, BoolSetting setting) {
++        this(ctx, key, setting, ctx.getUser());
++    }
++
++    public BoolSettingPrefController(Context ctx, String key, BoolSetting setting, UserHandle user) {
++        super(ctx, key);
++        this.setting = setting;
++        this.user = user;
++        Context userContext = ctx.getUser().equals(user) ? ctx : ctx.createContextAsUser(user, 0);
++        helper = new ExtSettingControllerHelper<>(userContext, setting);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        return helper.getAvailabilityStatus();
++    }
++
++    @Override
++    public final boolean isChecked() {
++        return setting.get(helper.context);
++    }
++
++    @Override
++    public boolean setChecked(boolean isChecked) {
++        return setting.put(helper.context, isChecked);
++    }
++
++    @Override
++    public void onResume(@NonNull LifecycleOwner owner) {
++        helper.onResume(this);
++    }
++
++    @Override
++    public void onPause(@NonNull LifecycleOwner owner) {
++        helper.onPause(this);
++    }
++
++    // called by the setting observer
++    @Override
++    public void accept(BoolSetting boolSetting) {
++        if (preference != null) {
++            updateState(preference);
++        }
++    }
++
++    // called when PreferenceScreen XML is parsed
++    public static void maybeAdd(Context context, Bundle metadata,
++                                List<BasePreferenceController> dest) {
++        String boolSettingField = metadata.getString(METADATA_BOOL_SETTING_FIELD);
++        if (boolSettingField == null) {
++            return;
++        }
++        String[] split = boolSettingField.split(" ");
++
++        BoolSetting boolSetting;
++        try {
++            Class c = Class.forName(split[0]);
++            Field field = c.getField(split[1]);
++            boolSetting = (BoolSetting) Objects.requireNonNull(field.get(null));
++        } catch (Exception e) {
++            throw new IllegalStateException("Invalid BoolSetting field " + boolSettingField);
++        }
++
++        String key = Objects.requireNonNull(metadata.getString(METADATA_KEY));
++
++        dest.add(new BoolSettingPrefController(context, key, boolSetting));
++    }
++}
+diff --git a/src/com/android/settings/ext/ExtSettingControllerHelper.java b/src/com/android/settings/ext/ExtSettingControllerHelper.java
+new file mode 100644
+index 0000000000..1c8e70d4cd
+--- /dev/null
++++ b/src/com/android/settings/ext/ExtSettingControllerHelper.java
+@@ -0,0 +1,72 @@
++/*
++ * Copyright (C) 2023 GrapheneOS
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package com.android.settings.ext;
++
++import android.content.ContentResolver;
++import android.content.Context;
++import android.ext.settings.Setting;
++import android.provider.Settings;
++
++import java.util.function.Consumer;
++
++import static com.android.settings.core.BasePreferenceController.AVAILABLE;
++import static com.android.settings.core.BasePreferenceController.CONDITIONALLY_UNAVAILABLE;
++import static com.android.settings.core.BasePreferenceController.DISABLED_FOR_USER;
++
++public class ExtSettingControllerHelper<T extends Setting> {
++    public final Context context;
++    private final T setting;
++
++    ExtSettingControllerHelper(Context context, T setting) {
++        this.context = context;
++        this.setting = setting;
++    }
++
++    public static int getGlobalSettingAvailability(Context ctx) {
++        return ctx.getUser().isSystem() ? AVAILABLE : DISABLED_FOR_USER;
++    }
++
++    public static int getSecondaryUserOnlySettingAvailability(Context ctx) {
++        return ctx.getUser().isSystem() ? DISABLED_FOR_USER : AVAILABLE;
++    }
++
++    public static int getDevModeSettingAvailability(Context ctx) {
++        ContentResolver cr = ctx.getContentResolver();
++        String key = Settings.Global.DEVELOPMENT_SETTINGS_ENABLED;
++
++        return (Settings.Global.getInt(cr, key, 0) == 0) ?
++            CONDITIONALLY_UNAVAILABLE : AVAILABLE;
++    }
++
++    int getAvailabilityStatus() {
++        if (setting.getScope() != Setting.Scope.PER_USER) {
++            return getGlobalSettingAvailability(context);
++        }
++        return AVAILABLE;
++    }
++
++    private Object observer;
++
++    void onResume(ExtSettingPrefController espc) {
++        registerObserver(espc);
++    }
++
++    void onPause(ExtSettingPrefController espc) {
++        unregisterObserver();
++    }
++
++    void registerObserver(Consumer<T> settingObserver) {
++        if (setting.canObserveState()) {
++            observer = setting.registerObserver(context, context.getMainThreadHandler(), settingObserver);
++        }
++    }
++
++    void unregisterObserver() {
++        if (setting.canObserveState()) {
++            setting.unregisterObserver(context, observer);
++        }
++    }
++}
+diff --git a/src/com/android/settings/ext/ExtSettingPrefController.java b/src/com/android/settings/ext/ExtSettingPrefController.java
+new file mode 100644
+index 0000000000..f641e344b5
+--- /dev/null
++++ b/src/com/android/settings/ext/ExtSettingPrefController.java
+@@ -0,0 +1,12 @@
++package com.android.settings.ext;
++
++import android.ext.settings.Setting;
++
++import androidx.annotation.NonNull;
++import androidx.lifecycle.DefaultLifecycleObserver;
++import androidx.lifecycle.LifecycleOwner;
++
++import java.util.function.Consumer;
++
++interface ExtSettingPrefController<T extends Setting> extends DefaultLifecycleObserver, Consumer<T> {
++}
+diff --git a/src/com/android/settings/ext/IntSettingPrefController.java b/src/com/android/settings/ext/IntSettingPrefController.java
+new file mode 100644
+index 0000000000..38ecc9a89b
+--- /dev/null
++++ b/src/com/android/settings/ext/IntSettingPrefController.java
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (C) 2022 GrapheneOS
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package com.android.settings.ext;
++
++import android.content.Context;
++import android.ext.settings.IntSetting;
++import android.os.UserHandle;
++
++import androidx.annotation.NonNull;
++import androidx.lifecycle.LifecycleOwner;
++
++public abstract class IntSettingPrefController extends AbstractListPreferenceController
++        implements ExtSettingPrefController<IntSetting>
++{
++    private final IntSetting setting;
++    private final ExtSettingControllerHelper<IntSetting> helper;
++
++    protected IntSettingPrefController(Context ctx, String key, IntSetting setting) {
++        this(ctx, key, setting, ctx.getUser());
++    }
++
++    protected IntSettingPrefController(Context ctx, String key, IntSetting setting, UserHandle user) {
++        super(ctx, key);
++        this.setting = setting;
++        Context userContext = ctx.getUser().equals(user) ? ctx : ctx.createContextAsUser(user, 0);
++        helper = new ExtSettingControllerHelper<>(userContext, setting);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        return helper.getAvailabilityStatus();
++    }
++
++    @Override
++    protected final int getCurrentValue() {
++        return setting.get(helper.context);
++    }
++
++    @Override
++    protected boolean setValue(int val) {
++        return setting.put(helper.context, val);
++    }
++
++    @Override
++    public void onResume(@NonNull LifecycleOwner owner) {
++        helper.onResume(this);
++    }
++
++    @Override
++    public void onPause(@NonNull LifecycleOwner owner) {
++        helper.onPause(this);
++    }
++
++    // called by the setting observer
++    @Override
++    public void accept(IntSetting intSetting) {
++        updatePreference();
++    }
++}

@@ -1,0 +1,98 @@
+From 1a0eca663d68e5843f21abac97bffff9a7509074 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Wed, 4 Dec 2024 19:23:22 +0200
+Subject: [PATCH 70/78] FusedLocation: remove racy and redundant lazy init in
+ Service.onBind()
+
+onBind() is always called immediately after onCreate() for these services. onBind() is called from
+binder threads, it's not thread-safe to perform lazy initialization there without locking.
+
+(cherry picked from commit 8cfd21e7e38a3f6c207eec39ba6b5c6be3e2b689)
+---
+ .../location/fused/FusedLocationService.java  | 23 ++++++++-----------
+ .../gnss/GnssOverlayLocationService.java      | 19 ++++++++-------
+ 2 files changed, 19 insertions(+), 23 deletions(-)
+
+diff --git a/packages/FusedLocation/src/com/android/location/fused/FusedLocationService.java b/packages/FusedLocation/src/com/android/location/fused/FusedLocationService.java
+index 1fa3824f23..92d406b0eb 100644
+--- a/packages/FusedLocation/src/com/android/location/fused/FusedLocationService.java
++++ b/packages/FusedLocation/src/com/android/location/fused/FusedLocationService.java
+@@ -26,30 +26,27 @@ import java.io.PrintWriter;
+ 
+ public class FusedLocationService extends Service {
+ 
+-    @Nullable private FusedLocationProvider mProvider;
++    private FusedLocationProvider mProvider;
+ 
+     @Override
+-    public IBinder onBind(Intent intent) {
+-        if (mProvider == null) {
+-            mProvider = new FusedLocationProvider(this);
+-            mProvider.start();
+-        }
++    public void onCreate() {
++        mProvider = new FusedLocationProvider(this);
++        mProvider.start();
++    }
+ 
++    @Override
++    public IBinder onBind(Intent intent) {
+         return mProvider.getBinder();
+     }
+ 
+     @Override
+     public void onDestroy() {
+-        if (mProvider != null) {
+-            mProvider.stop();
+-            mProvider = null;
+-        }
++        mProvider.stop();
++        mProvider = null;
+     }
+ 
+     @Override
+     protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
+-        if (mProvider != null) {
+-            mProvider.dump(writer);
+-        }
++        mProvider.dump(writer);
+     }
+ }
+diff --git a/packages/FusedLocation/src/com/android/location/gnss/GnssOverlayLocationService.java b/packages/FusedLocation/src/com/android/location/gnss/GnssOverlayLocationService.java
+index dd034fec94..67c116fbeb 100644
+--- a/packages/FusedLocation/src/com/android/location/gnss/GnssOverlayLocationService.java
++++ b/packages/FusedLocation/src/com/android/location/gnss/GnssOverlayLocationService.java
+@@ -26,24 +26,23 @@ import java.io.PrintWriter;
+ 
+ public class GnssOverlayLocationService extends Service {
+ 
+-    @Nullable private GnssOverlayLocationProvider mProvider;
++    private GnssOverlayLocationProvider mProvider;
+ 
+     @Override
+-    public IBinder onBind(Intent intent) {
+-        if (mProvider == null) {
+-            mProvider = new GnssOverlayLocationProvider(this);
+-            mProvider.start();
+-        }
++    public void onCreate() {
++        mProvider = new GnssOverlayLocationProvider(this);
++        mProvider.start();
++    }
+ 
++    @Override
++    public IBinder onBind(Intent intent) {
+         return mProvider.getBinder();
+     }
+ 
+     @Override
+     public void onDestroy() {
+-        if (mProvider != null) {
+-            mProvider.stop();
+-            mProvider = null;
+-        }
++        mProvider.stop();
++        mProvider = null;
+     }
+ 
+     @Override

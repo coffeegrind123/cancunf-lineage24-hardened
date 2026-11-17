@@ -1,0 +1,86 @@
+From f6b2c81d29561b6d072f009c8742b53c4c1daa88 Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Thu, 17 Jul 2025 01:02:47 -0700
+Subject: [PATCH 13/15] add Geocoder setting
+
+(cherry picked from commit ccf549ea253dd73da8945ff4ac20639abfc3918e)
+Change-Id: Ia07aae227f567462bbd6362fc49543eeea366e69
+---
+ res/values/strings_ext.xml                    |  8 +++++
+ res/xml/location_services.xml                 |  6 ++++
+ ...ionServicesGeocoderPreferenceController.kt | 34 +++++++++++++++++++
+ 3 files changed, 48 insertions(+)
+ create mode 100644 src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index 945f17fb55..f861d9c50a 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -45,4 +45,12 @@ This method can be particularly useful when GNSS is unavailable or unreliable, s
+     <string name="network_location_enabled_apple_china">Apple China server (required for China data)</string>
+     <string name="network_location_disabled">Off</string>
+ 
++    
++    <string name="geocoder_title">Geocoder</string>
++    <string name="geocoder_footer">
++"Forward and reverse geocoding are processes used to convert between geographic coordinates and human-readable addresses, respectively. Forward geocoding returns the coordinates for a given address, while reverse geocoding returns the address or addresses near a given set of coordinates. Apps can choose to use the geocoder selected here, which performs these lookups using a network-based service."
++    </string>
++    <string name="geocoder_enabled_grapheneos_proxy">GrapheneOS proxy</string>
++    <string name="geocoder_enabled_nominatim_server">Nominatim server</string>
++    <string name="geocoder_disabled">Off</string>
+ </resources>
+diff --git a/res/xml/location_services.xml b/res/xml/location_services.xml
+index 88015f947b..e33f3a5eac 100644
+--- a/res/xml/location_services.xml
++++ b/res/xml/location_services.xml
+@@ -40,4 +40,10 @@
+             android:title="@string/network_location_title"
+             settings:controller="com.android.settings.location.LocationServicesNetworkLocationPreferenceController"/>
+ 
++        <com.android.settingslib.RestrictedPreference
++            android:key="location_services_geocoder"
++            android:order="1003"
++            android:title="@string/geocoder_title"
++            settings:controller="com.android.settings.location.LocationServicesGeocoderPreferenceController" />
++
+ </PreferenceScreen>
+diff --git a/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt b/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+new file mode 100644
+index 0000000000..1409908c99
+--- /dev/null
++++ b/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+@@ -0,0 +1,34 @@
++package com.android.settings.location
++
++import android.content.Context
++import android.ext.settings.GeocoderSettings
++import androidx.preference.PreferenceScreen
++import com.android.settings.R
++import com.android.settings.ext.IntSettingPrefController
++import com.android.settings.ext.RadioButtonPickerFragment2
++
++/**
++ * Preference controller for Geocoder in Location Services.
++ */
++class LocationServicesGeocoderPreferenceController(ctx: Context, key: String?) :
++    IntSettingPrefController(ctx, key, GeocoderSettings.GEOCODER_SETTING) {
++
++    override fun addPrefsAfterList(fragment: RadioButtonPickerFragment2, screen: PreferenceScreen) {
++        addFooterPreference(screen, R.string.geocoder_footer)
++    }
++
++    override fun getEntries(entries: Entries) {
++        entries.add(
++            R.string.geocoder_enabled_grapheneos_proxy,
++            GeocoderSettings.GEOCODER_SERVER_GRAPHENEOS_PROXY
++        )
++        entries.add(
++            R.string.geocoder_enabled_nominatim_server,
++            GeocoderSettings.GEOCODER_SERVER_NOMINATIM
++        )
++        entries.add(
++            R.string.geocoder_disabled,
++            GeocoderSettings.GEOCODER_DISABLED
++        )
++    }
++}

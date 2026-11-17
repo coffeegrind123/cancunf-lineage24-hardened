@@ -1,0 +1,45 @@
+From 64922408d375234256175707fedf4a6fa3ac5ed8 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 7 Jul 2026 15:48:09 +0000
+Subject: [PATCH 78/78] GeocodeProviderBase: fix RemoteException handling in
+ SingleUseCallback
+
+IGeocodeCallback is provided by the untrusted client, not by system_server.
+
+(cherry picked from commit 6acb40add30101a0f8b3b84e31640e0af2fb0923)
+---
+ .../location/provider/GeocodeProviderBase.java       | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/location/java/android/location/provider/GeocodeProviderBase.java b/location/java/android/location/provider/GeocodeProviderBase.java
+index 71644d07be..2d9fde2df5 100644
+--- a/location/java/android/location/provider/GeocodeProviderBase.java
++++ b/location/java/android/location/provider/GeocodeProviderBase.java
+@@ -155,19 +155,23 @@ public abstract class GeocodeProviderBase {
+ 
+         @Override
+         public void onError(Throwable e) {
++            IGeocodeCallback callback = Objects.requireNonNull(mCallback.getAndSet(null));
+             try {
+-                Objects.requireNonNull(mCallback.getAndSet(null)).onError(e.toString());
++                callback.onError(e.toString());
+             } catch (RemoteException r) {
+-                throw r.rethrowFromSystemServer();
++                // IGeocodeCallback is a oneway binder that is provided by the untrusted client
++                Log.i("GeocodeProviderBase", "", r);
+             }
+         }
+ 
+         @Override
+         public void onResult(List<Address> results) {
++            IGeocodeCallback callback = Objects.requireNonNull(mCallback.getAndSet(null));
+             try {
+-                Objects.requireNonNull(mCallback.getAndSet(null)).onResults(results);
++                callback.onResults(results);
+             } catch (RemoteException e) {
+-                throw e.rethrowFromSystemServer();
++                // IGeocodeCallback is a oneway binder that is provided by the untrusted client
++                Log.i("GeocodeProviderBase", "", e);
+             }
+         }
+     }

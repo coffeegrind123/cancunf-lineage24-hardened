@@ -1,0 +1,53 @@
+From 93557b559c6a5e39bf5f124e3e303456c8714217 Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Sun, 29 Dec 2024 22:58:28 -0800
+Subject: [PATCH 3/4] allow INSTALL_LOCATION_PROVIDER permission to bypass scan
+ results' INTERACT_ACROSS_USERS_FULL permission check
+
+(cherry picked from commit eedb2526abecfa0985a330033574957efe1bb129)
+---
+ .../server/wifi/util/WifiPermissionsUtil.java | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java b/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java
+index 7f74af7ffd..e92114cf42 100644
+--- a/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java
++++ b/service/java/com/android/server/wifi/util/WifiPermissionsUtil.java
+@@ -614,14 +614,18 @@ public class WifiPermissionsUtil {
+             throw new SecurityException("UID " + uid + " has no wifi scan permission");
+         }
+         // If the User or profile is current, permission is granted
+-        // Otherwise, uid must have INTERACT_ACROSS_USERS_FULL permission.
++        // Otherwise, uid must have INTERACT_ACROSS_USERS_FULL permission or
++        // INSTALL_LOCATION_PROVIDER permission.
+         boolean isCurrentProfile = doesUidBelongToUser(
+                 uid, mWifiPermissionsWrapper.getCurrentUser());
+-        if (!isCurrentProfile && !checkInteractAcrossUsersFull(uid)) {
++        if (!isCurrentProfile && !checkInteractAcrossUsersFull(uid)
++                && !checkInstallLocationProviderPermission(uid)) {
+             if (mVerboseLoggingEnabled) {
+                 Log.v(TAG, "enforceCanAccessScanResults(pkg=" + pkgName + ", uid=" + uid + "): "
+                         + "isCurrentProfile=" + isCurrentProfile
+-                        + ", checkInteractAcrossUsersFull=" + checkInteractAcrossUsersFull(uid));
++                        + ", checkInteractAcrossUsersFull=" + checkInteractAcrossUsersFull(uid)
++                        + ", checkInstallLocationProviderPermission="
++                        + checkInstallLocationProviderPermission(uid));
+             }
+             throw new SecurityException("UID " + uid + " profile not permitted");
+         }
+@@ -924,6 +928,15 @@ public class WifiPermissionsUtil {
+                 == PackageManager.PERMISSION_GRANTED;
+     }
+ 
++    /**
++     * Returns true if the |uid| holds INSTALL_LOCATION_PROVIDER permission.
++     */
++    public boolean checkInstallLocationProviderPermission(int uid) {
++        return mWifiPermissionsWrapper.getUidPermission(
++                android.Manifest.permission.INSTALL_LOCATION_PROVIDER, uid)
++                == PackageManager.PERMISSION_GRANTED;
++    }
++
+     /**
+      * Returns the DevicePolicyManager from context
+      */

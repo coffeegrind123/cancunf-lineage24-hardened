@@ -1,0 +1,49 @@
+From a09c795a86776e49256ccfa2948521c3b6047fb5 Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Wed, 4 Mar 2026 00:19:11 -0800
+Subject: [PATCH 14/15] change geocoder GrapheneOS proxy to server and
+ Nominatim server to OpenStreetMaps
+
+We now have our own self-hosted Nominatim instance.
+
+(cherry picked from commit 5d129a2dd2a99aa7377e45cb21834004404ef967)
+---
+ res/values/strings_ext.xml                                | 4 ++--
+ .../LocationServicesGeocoderPreferenceController.kt       | 8 ++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index f861d9c50a..4d41a03cb0 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -50,7 +50,7 @@ This method can be particularly useful when GNSS is unavailable or unreliable, s
+     <string name="geocoder_footer">
+ "Forward and reverse geocoding are processes used to convert between geographic coordinates and human-readable addresses, respectively. Forward geocoding returns the coordinates for a given address, while reverse geocoding returns the address or addresses near a given set of coordinates. Apps can choose to use the geocoder selected here, which performs these lookups using a network-based service."
+     </string>
+-    <string name="geocoder_enabled_grapheneos_proxy">GrapheneOS proxy</string>
+-    <string name="geocoder_enabled_nominatim_server">Nominatim server</string>
++    <string name="geocoder_enabled_grapheneos_server">GrapheneOS server</string>
++    <string name="geocoder_enabled_openstreetmaps_server">OpenStreetMaps server</string>
+     <string name="geocoder_disabled">Off</string>
+ </resources>
+diff --git a/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt b/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+index 1409908c99..4b62a8ec84 100644
+--- a/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
++++ b/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+@@ -19,12 +19,12 @@ class LocationServicesGeocoderPreferenceController(ctx: Context, key: String?) :
+ 
+     override fun getEntries(entries: Entries) {
+         entries.add(
+-            R.string.geocoder_enabled_grapheneos_proxy,
+-            GeocoderSettings.GEOCODER_SERVER_GRAPHENEOS_PROXY
++            R.string.geocoder_enabled_grapheneos_server,
++            GeocoderSettings.GEOCODER_SERVER_GRAPHENEOS
+         )
+         entries.add(
+-            R.string.geocoder_enabled_nominatim_server,
+-            GeocoderSettings.GEOCODER_SERVER_NOMINATIM
++            R.string.geocoder_enabled_openstreetmaps_server,
++            GeocoderSettings.GEOCODER_SERVER_OPENSTREETMAPS
+         )
+         entries.add(
+             R.string.geocoder_disabled,

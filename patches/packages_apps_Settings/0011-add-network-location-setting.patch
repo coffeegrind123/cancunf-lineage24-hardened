@@ -1,0 +1,93 @@
+From e0b0d93817bf1defa16365d4981ae86dc33c00a5 Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Mon, 4 Nov 2024 20:32:27 -0800
+Subject: [PATCH 11/15] add network location setting
+
+(cherry picked from commit 6ba9c6744fc6cdf4fc4d5bcb9770e07bfbb3cd67)
+Change-Id: I6b5f927caec164c2df866f3d803cee9f2de6244c
+---
+ res/values/strings_ext.xml                    | 11 ++++++
+ res/xml/location_services.xml                 |  6 +++
+ ...icesNetworkLocationPreferenceController.kt | 38 +++++++++++++++++++
+ 3 files changed, 55 insertions(+)
+ create mode 100644 src/com/android/settings/location/LocationServicesNetworkLocationPreferenceController.kt
+
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index cfd9829214..945f17fb55 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -34,4 +34,15 @@ No query or data is sent to the server. These files contain orbits and statuses
+     <string name="psds_disabled">Off</string>
+     <string name="psds_disabled_summary">Will make acquiring location lock significantly slower, especially if SUPL is turned off too</string>
+ 
++    <string name="network_location_title">Network location</string>
++    <string name="network_location_footer">
++"Network location is a method of determining your device’s location by using various nearby signals, such as Wi-Fi networks, Bluetooth devices, and cell towers. Your device scans for these signals and sends their identifiers to a server, which then provides positioning data that your device uses to estimate its location. Currently, Wi-Fi networks and cell towers are used.
++
++This method can be particularly useful when GNSS is unavailable or unreliable, such as indoors or in areas with poor satellite reception. Network location provides a quicker way to determine your location before a GNSS lock is acquired or when GNSS signals are weak."
++    </string>
++    <string name="network_location_enabled_grapheneos_apple_proxy">GrapheneOS Apple proxy</string>
++    <string name="network_location_enabled_apple">Apple server</string>
++    <string name="network_location_enabled_apple_china">Apple China server (required for China data)</string>
++    <string name="network_location_disabled">Off</string>
++
+ </resources>
+diff --git a/res/xml/location_services.xml b/res/xml/location_services.xml
+index c3734ede4b..88015f947b 100644
+--- a/res/xml/location_services.xml
++++ b/res/xml/location_services.xml
+@@ -34,4 +34,10 @@
+             android:title="@string/location_scanning_bluetooth_always_scanning_title"
+             settings:controller="com.android.settings.location.LocationServicesBluetoothScanningPreferenceController"/>
+ 
++        <com.android.settingslib.RestrictedPreference
++            android:order="1002"
++            android:key="location_services_network_location"
++            android:title="@string/network_location_title"
++            settings:controller="com.android.settings.location.LocationServicesNetworkLocationPreferenceController"/>
++
+ </PreferenceScreen>
+diff --git a/src/com/android/settings/location/LocationServicesNetworkLocationPreferenceController.kt b/src/com/android/settings/location/LocationServicesNetworkLocationPreferenceController.kt
+new file mode 100644
+index 0000000000..4b34ea66db
+--- /dev/null
++++ b/src/com/android/settings/location/LocationServicesNetworkLocationPreferenceController.kt
+@@ -0,0 +1,38 @@
++package com.android.settings.location
++
++import android.content.Context
++import android.ext.settings.NetworkLocationSettings
++import androidx.preference.PreferenceScreen
++import com.android.settings.R
++import com.android.settings.ext.IntSettingPrefController
++import com.android.settings.ext.RadioButtonPickerFragment2
++
++/**
++ * Preference controller for Network location in Location Services.
++ */
++class LocationServicesNetworkLocationPreferenceController(ctx: Context, key: String?) :
++    IntSettingPrefController(ctx, key, NetworkLocationSettings.NETWORK_LOCATION_SETTING) {
++
++    override fun addPrefsAfterList(fragment: RadioButtonPickerFragment2, screen: PreferenceScreen) {
++        addFooterPreference(screen, R.string.network_location_footer)
++    }
++
++    override fun getEntries(entries: Entries) {
++        entries.add(
++            R.string.network_location_enabled_grapheneos_apple_proxy,
++            NetworkLocationSettings.NETWORK_LOCATION_GRAPHENEOS_APPLE_PROXY
++        )
++        entries.add(
++            R.string.network_location_enabled_apple,
++            NetworkLocationSettings.NETWORK_LOCATION_APPLE
++        )
++        entries.add(
++            R.string.network_location_enabled_apple_china,
++            NetworkLocationSettings.NETWORK_LOCATION_APPLE_CHINA
++        )
++        entries.add(
++            R.string.network_location_disabled,
++            NetworkLocationSettings.NETWORK_LOCATION_DISABLED
++        )
++    }
++}

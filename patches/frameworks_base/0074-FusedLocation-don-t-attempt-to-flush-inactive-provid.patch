@@ -1,0 +1,60 @@
+From b2b53204b07b1c8cfdbbcdfcdadb2eacff9cf345 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 28 Feb 2025 17:34:20 +0200
+Subject: [PATCH 74/78] FusedLocation: don't attempt to flush inactive
+ providers
+
+Flush of inactive (unregistered or never registered) provider throws an exception which crashes
+the system_server.
+
+This issue was hidden when there was no network location provider, see QUALITY_LOW_POWER logic in
+updateRequirementsLocked().
+
+(cherry picked from commit cc4fb8697ca406d8baa843d371950227248d559e)
+---
+ .../location/fused/FusedLocationProvider.java      | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java b/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java
+index dfcc02339e..6b58800583 100644
+--- a/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java
++++ b/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java
+@@ -133,10 +133,12 @@ public class FusedLocationProvider extends LocationProviderBase {
+     public void onFlush(OnFlushCompleteCallback callback) {
+         synchronized (mLock) {
+             AtomicInteger flushCount = new AtomicInteger(0);
+-            if (mGpsPresent) {
++            boolean flushGps = mGpsListener.isActive();
++            if (flushGps) {
+                 flushCount.incrementAndGet();
+             }
+-            if (mNlpPresent) {
++            boolean flushNetwork = mNetworkListener.isActive();
++            if (flushNetwork) {
+                 flushCount.incrementAndGet();
+             }
+ 
+@@ -146,10 +148,10 @@ public class FusedLocationProvider extends LocationProviderBase {
+                 }
+             };
+ 
+-            if (mGpsPresent) {
++            if (flushGps) {
+                 mGpsListener.flush(wrapper);
+             }
+-            if (mNlpPresent) {
++            if (flushNetwork) {
+                 mNetworkListener.flush(wrapper);
+             }
+         }
+@@ -287,6 +289,10 @@ public class FusedLocationProvider extends LocationProviderBase {
+             }
+         }
+ 
++        boolean isActive() {
++            return getInterval() != INTERVAL_DISABLED;
++        }
++
+         private void resetProviderRequest(long newInterval) {
+             synchronized (mLock) {
+                 if (newInterval == mInterval) {

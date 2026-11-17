@@ -1,0 +1,92 @@
+From b2a84251bca36c6c505ee24a0744cf6dc066a93f Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 3 Mar 2023 09:53:21 +0200
+Subject: [PATCH 09/15] add GNSS SUPL setting
+
+(cherry picked from commit d186cdd504e33619912022314c812e662a5961ff)
+---
+ res/values/strings_ext.xml                    |  8 ++++
+ res/xml/location_settings.xml                 |  5 +++
+ .../location/GnssSuplPrefController.java      | 40 +++++++++++++++++++
+ 3 files changed, 53 insertions(+)
+ create mode 100644 src/com/android/settings/location/GnssSuplPrefController.java
+
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index 5aac21a1bc..5a5d5efc99 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -16,4 +16,12 @@
+     <string name="app_play_integrity_api_not_blocked">Not blocked</string>
+     <string name="app_play_integrity_see_all_apps">Show apps that used the Play Integrity API</string>
+ 
++    <string name="pref_gnss_supl_title">Secure User Plane Location (SUPL)</string>
++    <string name="pref_gnss_supl_footer">A-GNSS (assisted satellite geolocation) based on nearby cell towers.</string>
++
++    <string name="supl_enabled_grapheneos_proxy">GrapheneOS proxy</string>
++    <string name="supl_enabled_standard_server">Standard server</string>
++    <string name="supl_disabled">Off</string>
++    <string name="supl_disabled_summary">Will make acquiring location lock significantly slower, especially if PSDS is turned off too</string>
++
+ </resources>
+diff --git a/res/xml/location_settings.xml b/res/xml/location_settings.xml
+index 74bc00b4ff..7c7fabd1b7 100644
+--- a/res/xml/location_settings.xml
++++ b/res/xml/location_settings.xml
+@@ -83,6 +83,11 @@
+             android:title="@string/location_services_preference_title"
+             settings:controller="com.android.settings.location.LocationServicesPreferenceController"/>
+ 
++        <Preference
++            android:key="gnss_supl"
++            android:title="@string/pref_gnss_supl_title"
++            settings:controller="com.android.settings.location.GnssSuplPrefController"/>
++
+     </com.android.settingslib.widget.UntitledPreferenceCategory>
+ 
+     <com.android.settingslib.widget.FooterPreference
+diff --git a/src/com/android/settings/location/GnssSuplPrefController.java b/src/com/android/settings/location/GnssSuplPrefController.java
+new file mode 100644
+index 0000000000..95be474c9d
+--- /dev/null
++++ b/src/com/android/settings/location/GnssSuplPrefController.java
+@@ -0,0 +1,40 @@
++package com.android.settings.location;
++
++import android.content.Context;
++import android.content.pm.PackageManager;
++import android.ext.settings.GnssSettings;
++
++import androidx.preference.PreferenceScreen;
++
++import com.android.settings.R;
++import com.android.settings.ext.IntSettingPrefController;
++import com.android.settings.ext.RadioButtonPickerFragment2;
++
++public class GnssSuplPrefController extends IntSettingPrefController {
++    private final boolean hasGpsFeature;
++
++    public GnssSuplPrefController(Context ctx, String key) {
++        super(ctx, key, GnssSettings.SUPL_SETTING);
++        hasGpsFeature = ctx.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LOCATION_GPS);
++    }
++
++    @Override
++    public void addPrefsAfterList(RadioButtonPickerFragment2 fragment, PreferenceScreen screen) {
++        addFooterPreference(screen, R.string.pref_gnss_supl_footer);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        if (!hasGpsFeature) {
++            return UNSUPPORTED_ON_DEVICE;
++        }
++        return super.getAvailabilityStatus();
++    }
++
++    @Override
++    protected void getEntries(Entries entries) {
++        entries.add(R.string.supl_enabled_grapheneos_proxy, GnssSettings.SUPL_SERVER_GRAPHENEOS_PROXY);
++        entries.add(R.string.supl_enabled_standard_server, GnssSettings.SUPL_SERVER_STANDARD);
++        entries.add(R.string.supl_disabled, R.string.supl_disabled_summary, GnssSettings.SUPL_DISABLED);
++    }
++}

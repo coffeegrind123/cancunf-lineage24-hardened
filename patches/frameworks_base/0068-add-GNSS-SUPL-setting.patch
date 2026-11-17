@@ -1,0 +1,154 @@
+From 0b7802d94661c3d99de90a38b0e7c6f4d2f30a77 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Fri, 3 Mar 2023 08:57:45 +0200
+Subject: [PATCH 68/78] add GNSS SUPL setting
+
+(cherry picked from commit 1259408b527e09dd4b2218a8c6233e53e8e03d93)
+Change-Id: If4eba9c4de0d3f742b3c4cb6a72357417f07c043
+---
+ .../android/ext/settings/GnssSettings.java    | 18 +++++++++++++
+ core/java/android/provider/Settings.java      |  4 +++
+ .../location/gnss/GnssConfiguration.java      | 27 +++++++++++++++++++
+ .../location/gnss/GnssLocationProvider.java   | 11 ++++++++
+ 4 files changed, 60 insertions(+)
+ create mode 100644 core/java/android/ext/settings/GnssSettings.java
+
+diff --git a/core/java/android/ext/settings/GnssSettings.java b/core/java/android/ext/settings/GnssSettings.java
+new file mode 100644
+index 0000000000..0cea9ccbeb
+--- /dev/null
++++ b/core/java/android/ext/settings/GnssSettings.java
+@@ -0,0 +1,18 @@
++package android.ext.settings;
++
++import android.provider.Settings;
++
++/** @hide */
++public class GnssSettings {
++
++    public static final int SUPL_SERVER_STANDARD = 0;
++    public static final int SUPL_DISABLED = 1;
++    public static final int SUPL_SERVER_GRAPHENEOS_PROXY = 2;
++
++    public static final IntSetting SUPL_SETTING = new IntSetting(
++            Setting.Scope.GLOBAL, Settings.Global.GNSS_SUPL,
++            SUPL_SERVER_GRAPHENEOS_PROXY, // default
++            SUPL_SERVER_STANDARD, SUPL_DISABLED, SUPL_SERVER_GRAPHENEOS_PROXY // valid values
++    );
++
++}
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index 6e9ef56cbf..0052da04cf 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -14458,6 +14458,10 @@ public final class Settings {
+         public static final String ALLOW_DISABLING_HARDENING_VIA_APP_COMPAT_CONFIG =
+                 "allow_automatic_pkg_hardening_config"; // historical name
+ 
++        /** @hide */
++        @Protected(restrictReads = false, readWrite = KnownSystemPackage.SETTINGS)
++        public static final String GNSS_SUPL = "force_disable_supl"; // historical name
++
+         // ExtSettings END
+ 
+         // NOTE: If you add new settings here, be sure to add them to
+diff --git a/services/core/java/com/android/server/location/gnss/GnssConfiguration.java b/services/core/java/com/android/server/location/gnss/GnssConfiguration.java
+index 04b11c0ed8..c1e9419eae 100644
+--- a/services/core/java/com/android/server/location/gnss/GnssConfiguration.java
++++ b/services/core/java/com/android/server/location/gnss/GnssConfiguration.java
+@@ -17,6 +17,7 @@
+ package com.android.server.location.gnss;
+ 
+ import android.content.Context;
++import android.ext.settings.GnssSettings;
+ import android.os.PersistableBundle;
+ import android.os.SystemProperties;
+ import android.telephony.CarrierConfigManager;
+@@ -24,6 +25,7 @@ import android.telephony.SubscriptionManager;
+ import android.telephony.TelephonyManager;
+ import android.text.TextUtils;
+ import android.util.Log;
++import android.util.Slog;
+ 
+ import com.android.internal.util.FrameworkStatsLog;
+ 
+@@ -296,6 +298,8 @@ public class GnssConfiguration {
+         loadPropertiesFromGpsDebugConfig(mProperties, DEBUG_PROPERTIES_SYSTEM_FILE);
+         mEsExtensionSec = getRangeCheckedConfigEsExtensionSec();
+ 
++        applyConfigOverrides(mContext, mProperties);
++
+         logConfigurations();
+ 
+         final HalInterfaceVersion gnssConfigurationIfaceVersion = getHalInterfaceVersion();
+@@ -512,4 +516,27 @@ public class GnssConfiguration {
+     private static native boolean native_set_satellite_blocklist(int[] constellations, int[] svIds);
+ 
+     private static native boolean native_set_es_extension_sec(int emergencyExtensionSeconds);
++
++    private static void applyConfigOverrides(Context ctx, Properties props) {
++        final int suplMode = GnssSettings.SUPL_SETTING.get(ctx);
++
++        switch (suplMode) {
++            case GnssSettings.SUPL_SERVER_STANDARD:
++                Slog.d(TAG, "SUPL: using the standard server");
++                break;
++            case GnssSettings.SUPL_DISABLED:
++                Slog.d(TAG, "SUPL is disabled");
++                // SUPL mode is a bitmask, see
++                // hardware/interfaces/gnss/aidl/android/hardware/gnss/IGnssConfiguration.aidl
++                props.setProperty(CONFIG_SUPL_MODE, "0");
++                props.remove(CONFIG_SUPL_HOST);
++                props.remove(CONFIG_SUPL_PORT);
++                break;
++            case GnssSettings.SUPL_SERVER_GRAPHENEOS_PROXY:
++                Slog.d(TAG, "SUPL: using the GrapheneOS proxy");
++                props.setProperty(CONFIG_SUPL_HOST, "supl.grapheneos.org");
++                props.setProperty(CONFIG_SUPL_PORT, "7275");
++                break;
++        }
++    }
+ }
+diff --git a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+index 1a211c9990..465291cb33 100644
+--- a/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
++++ b/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java
+@@ -60,6 +60,8 @@ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.content.pm.PackageManager;
+ import android.database.ContentObserver;
++import android.ext.settings.GnssSettings;
++import android.ext.settings.IntSetting;
+ import android.location.GnssCapabilities;
+ import android.location.GnssStatus;
+ import android.location.Location;
+@@ -105,6 +107,7 @@ import android.text.TextUtils;
+ import android.text.format.DateUtils;
+ import android.util.Log;
+ import android.util.Pair;
++import android.util.Slog;
+ import android.util.TimeUtils;
+ 
+ import com.android.internal.annotations.GuardedBy;
+@@ -131,6 +134,7 @@ import java.util.Objects;
+ import java.util.Set;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.TimeUnit;
++import java.util.function.Consumer;
+ 
+ /**
+  * A GNSS implementation of LocationProvider used by LocationManager.
+@@ -495,6 +499,13 @@ public class GnssLocationProvider extends AbstractLocationProvider implements
+         mGnssNative.setNotificationCallbacks(this);
+         mGnssNative.setLocationRequestCallbacks(this);
+         mGnssNative.setTimeCallbacks(this);
++
++        Consumer<IntSetting> suplSettingObserver = setting -> {
++            Slog.d(TAG, "SUPL setting changed, value: " + setting.get(mContext));
++            reloadGpsProperties();
++        };
++
++        GnssSettings.SUPL_SETTING.registerObserver(mContext, mHandler, suplSettingObserver);
+     }
+ 
+     /** Called when system is ready. */

@@ -1,0 +1,22 @@
+From df2c30747d69e52ee80a81aff84b60a14401f83e Mon Sep 17 00:00:00 2001
+From: Daniel Micay <daniel.micay@grapheneos.org>
+Date: Tue, 20 Oct 2026 13:12:00 -0400
+Subject: [PATCH 9/9] add NetworkLocation to generic
+
+(cherry picked from commit 7fedec9c19acb6c1ca897feefd5f37b6d5b689b6)
+---
+ target/product/generic/Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/target/product/generic/Android.bp b/target/product/generic/Android.bp
+index 15c160467..27a9c0695 100644
+--- a/target/product/generic/Android.bp
++++ b/target/product/generic/Android.bp
+@@ -861,6 +861,7 @@ system_image_defaults {
+                 "MmsService", // handheld_system
+                 "MtpService", // handheld_system
+                 "MusicFX", // handheld_system
++                "NetworkLocation", // handheld_system
+                 "NetworkStack", // base_system
+                 "ONS", // telephony_system
+                 "PacProcessor", // handheld_system

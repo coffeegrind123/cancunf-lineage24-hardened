@@ -1,0 +1,51 @@
+From 3ad0c222f4ddb192634146f2c9abc690953fe02b Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Sun, 27 Jul 2025 01:50:02 -0700
+Subject: [PATCH 76/78] add Geocoder setting
+
+(cherry picked from commit 348d240bcc95725d81f43071c58469c6541b0547)
+---
+ .../android/ext/settings/GeocoderSettings.java  | 17 +++++++++++++++++
+ core/java/android/provider/Settings.java        |  5 +++++
+ 2 files changed, 22 insertions(+)
+ create mode 100644 core/java/android/ext/settings/GeocoderSettings.java
+
+diff --git a/core/java/android/ext/settings/GeocoderSettings.java b/core/java/android/ext/settings/GeocoderSettings.java
+new file mode 100644
+index 0000000000..969a38970e
+--- /dev/null
++++ b/core/java/android/ext/settings/GeocoderSettings.java
+@@ -0,0 +1,17 @@
++package android.ext.settings;
++
++import android.provider.Settings;
++
++/** @hide */
++public class GeocoderSettings {
++
++    public static final int GEOCODER_DISABLED = 0;
++    public static final int GEOCODER_SERVER_OPENSTREETMAP = 1;
++    public static final int GEOCODER_SERVER_GRAPHENEOS = 2;
++
++    public static final IntSetting GEOCODER_SETTING = new IntSetting(
++            Setting.Scope.GLOBAL, Settings.Global.GEOCODER,
++            GEOCODER_DISABLED, // default
++            GEOCODER_SERVER_GRAPHENEOS, GEOCODER_SERVER_OPENSTREETMAP, GEOCODER_DISABLED // valid values
++    );
++}
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index f265487e80..22d838baec 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -14471,6 +14471,11 @@ public final class Settings {
+                 KnownSystemPackage.SETUP_WIZARD})
+         public static final String NETWORK_LOCATION = "network_location";
+ 
++        /** @hide */
++        @Protected(restrictReads = false, readWrite = {KnownSystemPackage.SETTINGS,
++                KnownSystemPackage.SETUP_WIZARD})
++        public static final String GEOCODER = "geocoder";
++
+         // ExtSettings END
+ 
+         // NOTE: If you add new settings here, be sure to add them to

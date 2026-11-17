@@ -1,0 +1,24 @@
+From 8c36f3defc3fecd8f5a9fa1f0437438cd8ae4e98 Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Mon, 23 Dec 2024 17:49:47 -0800
+Subject: [PATCH 73/78] add network location provider to
+ config_locationProviderPackageNames
+
+(cherry picked from commit df6a80b3bc778910c320c7d28abd8d9db5b7add3)
+---
+ core/res/res/values/config.xml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index 9bdefda6f8..daabbe1d74 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -2272,6 +2272,8 @@
+     <string-array name="config_locationProviderPackageNames" translatable="false">
+         <!-- The standard AOSP fused location provider -->
+         <item>com.android.location.fused</item>
++        <!-- The GrapheneOS network location provider -->
++        <item>app.grapheneos.networklocation</item>
+     </string-array>
+ 
+     <!-- Package name providing population density location support. -->

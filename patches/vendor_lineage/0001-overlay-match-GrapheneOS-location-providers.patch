@@ -1,0 +1,38 @@
+From 4e469bd3adc863ec96d5e1fd2d6fbea202dd1dc6 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Tue, 17 Nov 2026 07:24:14 +0000
+Subject: [PATCH] overlay: match GrapheneOS location providers
+
+This overlay redefines config_locationProviderPackageNames, which
+replaced GrapheneOS df6a80b3bc's entry in the framework default. The
+list decides who gets the location provider default permission
+grants, so NetworkLocation never got location or READ_PHONE_STATE
+and crashed on its first cell scan.
+
+Use GrapheneOS's list: fused plus NetworkLocation. Packages on the
+list are also exempt from the location privacy indicator, and Play
+services here is sandboxed and user-installed (no microG in this
+image), so its location use should show.
+
+Change-Id: Ib984906b43db5045249ee6e2c3c3f01327ee6bf6
+---
+ overlay/common/frameworks/base/core/res/res/values/config.xml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/overlay/common/frameworks/base/core/res/res/values/config.xml b/overlay/common/frameworks/base/core/res/res/values/config.xml
+index b34eb8f..3de8529 100644
+--- a/overlay/common/frameworks/base/core/res/res/values/config.xml
++++ b/overlay/common/frameworks/base/core/res/res/values/config.xml
+@@ -34,10 +34,10 @@
+          The chosen package for the specific location provider does not
+          depend on the order of this list. -->
+     <string-array name="config_locationProviderPackageNames" translatable="false">
+-        <!-- The Google provider -->
+-        <item>com.google.android.gms</item>
+         <!-- The standard AOSP fused location provider -->
+         <item>com.android.location.fused</item>
++        <!-- The GrapheneOS network location provider -->
++        <item>app.grapheneos.networklocation</item>
+     </string-array>
+ 
+     <string-array name="config_locationExtraPackageNames" translatable="false">

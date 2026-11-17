@@ -1,0 +1,38 @@
+From d86a37ceee90c374123b53d0245e7f437da11bd5 Mon Sep 17 00:00:00 2001
+From: soupslurpr <92235850+soupslurpr@users.noreply.github.com>
+Date: Fri, 6 Mar 2026 15:19:28 -0800
+Subject: [PATCH 15/15] use correct name for OpenStreetMap in Geocoder settings
+
+(cherry picked from commit d27c1f007d71b8716650a529c4bdeaa4a1a8bf2c)
+---
+ res/values/strings_ext.xml                                    | 2 +-
+ .../location/LocationServicesGeocoderPreferenceController.kt  | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/res/values/strings_ext.xml b/res/values/strings_ext.xml
+index 4d41a03cb0..038a059c3a 100644
+--- a/res/values/strings_ext.xml
++++ b/res/values/strings_ext.xml
+@@ -51,6 +51,6 @@ This method can be particularly useful when GNSS is unavailable or unreliable, s
+ "Forward and reverse geocoding are processes used to convert between geographic coordinates and human-readable addresses, respectively. Forward geocoding returns the coordinates for a given address, while reverse geocoding returns the address or addresses near a given set of coordinates. Apps can choose to use the geocoder selected here, which performs these lookups using a network-based service."
+     </string>
+     <string name="geocoder_enabled_grapheneos_server">GrapheneOS server</string>
+-    <string name="geocoder_enabled_openstreetmaps_server">OpenStreetMaps server</string>
++    <string name="geocoder_enabled_openstreetmap_server">OpenStreetMap server</string>
+     <string name="geocoder_disabled">Off</string>
+ </resources>
+diff --git a/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt b/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+index 4b62a8ec84..2951671fd9 100644
+--- a/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
++++ b/src/com/android/settings/location/LocationServicesGeocoderPreferenceController.kt
+@@ -23,8 +23,8 @@ class LocationServicesGeocoderPreferenceController(ctx: Context, key: String?) :
+             GeocoderSettings.GEOCODER_SERVER_GRAPHENEOS
+         )
+         entries.add(
+-            R.string.geocoder_enabled_openstreetmaps_server,
+-            GeocoderSettings.GEOCODER_SERVER_OPENSTREETMAPS
++            R.string.geocoder_enabled_openstreetmap_server,
++            GeocoderSettings.GEOCODER_SERVER_OPENSTREETMAP
+         )
+         entries.add(
+             R.string.geocoder_disabled,

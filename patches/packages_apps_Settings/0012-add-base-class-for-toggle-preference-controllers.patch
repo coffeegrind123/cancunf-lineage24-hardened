@@ -1,0 +1,55 @@
+From 68fd05c48a8920157065707c32ad2ec242b90ec2 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Tue, 14 Feb 2023 08:45:56 +0200
+Subject: [PATCH 12/15] add base class for toggle preference controllers
+
+(cherry picked from commit b53de33c0f5df576b9b6e263ecea4814303802ac)
+---
+ .../ext/AbstractTogglePrefController.java     | 38 +++++++++++++++++++
+ 1 file changed, 38 insertions(+)
+ create mode 100644 src/com/android/settings/ext/AbstractTogglePrefController.java
+
+diff --git a/src/com/android/settings/ext/AbstractTogglePrefController.java b/src/com/android/settings/ext/AbstractTogglePrefController.java
+new file mode 100644
+index 0000000000..ceee6984bf
+--- /dev/null
++++ b/src/com/android/settings/ext/AbstractTogglePrefController.java
+@@ -0,0 +1,38 @@
++package com.android.settings.ext;
++
++import android.content.Context;
++
++import androidx.annotation.Nullable;
++import androidx.preference.Preference;
++
++import com.android.settings.core.TogglePreferenceController;
++
++public abstract class AbstractTogglePrefController extends TogglePreferenceController {
++
++    protected AbstractTogglePrefController(Context ctx, String key) {
++        super(ctx, key);
++    }
++
++    @Nullable protected Preference preference;
++
++    @Override
++    public void updateState(Preference preference) {
++        super.updateState(preference);
++
++        if (preference != this.preference) {
++            preference.setSingleLineTitle(false);
++            preference.setPersistent(false);
++            this.preference = preference;
++        }
++    }
++
++    @Override
++    public boolean isSliceable() {
++        return false;
++    }
++
++    @Override
++    public int getSliceHighlightMenuRes() {
++        return NO_RES;
++    }
++}

@@ -1,0 +1,40 @@
+From 28ca1e3e1dc28df4908b77ff09acab187365da37 Mon Sep 17 00:00:00 2001
+From: Dmitry Muhomor <muhomor.dmitry@gmail.com>
+Date: Mon, 26 Jan 2026 09:23:28 +0000
+Subject: [PATCH 75/78] FusedLocationProvider: restore pre-16-QPR1 GNSS usage
+ policy
+
+Network location provider is disabled by default on GrapheneOS and is not as accurate as the
+GmsCore network location implementation.
+
+Upstream 16 QPR1 change: e1490213801cc9eeb442aeb7260b6033b179a2ea
+
+(cherry picked from commit ae077bd735cc7c555630b6b2d728bbffc9a0793c)
+---
+ .../com/android/location/fused/FusedLocationProvider.java   | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java b/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java
+index 6b58800583..d70432f618 100644
+--- a/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java
++++ b/packages/FusedLocation/src/com/android/location/fused/FusedLocationProvider.java
+@@ -62,9 +62,6 @@ public class FusedLocationProvider extends LocationProviderBase {
+                 .build();
+ 
+     private static final long MAX_LOCATION_COMPARISON_NS = 11 * 1000000000L; // 11 seconds
+-    // Maximum request interval at which we will activate GPS (because GPS sometimes consumes
+-    // excessive power with large intervals).
+-    private static final long MAX_GPS_INTERVAL_MS = 5 * 1000; // 5 seconds
+ 
+     private final Object mLock = new Object();
+ 
+@@ -171,8 +168,7 @@ public class FusedLocationProvider extends LocationProviderBase {
+             mNlpPresent = mLocationManager.hasProvider(NETWORK_PROVIDER);
+         }
+ 
+-        boolean requestAllowsGps = mRequest.getQuality() == QUALITY_HIGH_ACCURACY
+-                && mRequest.getIntervalMillis() <= MAX_GPS_INTERVAL_MS;
++        boolean requestAllowsGps = !mNlpPresent || mRequest.getQuality() < LocationRequest.QUALITY_LOW_POWER;
+         long gpsInterval =
+                 mGpsPresent && (requestAllowsGps || !mNlpPresent)
+                         ? mRequest.getIntervalMillis() : INTERVAL_DISABLED;
