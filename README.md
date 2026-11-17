@@ -16,7 +16,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | VoLTE calls / SMS | phase 5. No SIM yet, so only the no-SIM half can be verified |
 | pi coding agent with system access (privileged bridge, Computer Control) | planned (phase 6) |
 | Apps outside the image (sandboxed Play, Aurora Store, F-Droid, Termux, Titanium Browser; later Ovis) | AppSetup installs and updates them, each pinned to its signing certificate: [docs/10-appsetup.md](docs/10-appsetup.md) |
-| OTA updates from GitHub releases, periodic re-port | running with the LineageOS Updater: per-build feed, incrementals from the three newest older builds, streamed installs, both full and incremental verified on the phone. GrapheneOS Updater optional later. Runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
+| OTA updates from GitHub releases, periodic re-port | running with the LineageOS Updater: one feed for every build, incrementals from the three newest older builds, streamed installs, both full and incremental verified on the phone. GrapheneOS Updater optional later. Runbook in [docs/07-maintenance.md](docs/07-maintenance.md) |
 | Pixel look and feel (fonts, sounds, clocks, ThemePicker, optional Pixel Launcher) from PixelOS's Pixel repos | planned (phase 10) |
 | Own kernel ([fork](https://github.com/coffeegrind123/kernel_motorola_cancunf)): Google `android12-5.10` fixes plus GrapheneOS hardening | planned (phase 9), [docs/08-kernel.md](docs/08-kernel.md) |
 
@@ -45,7 +45,7 @@ build/zram.sh                        compressed RAM swap for the VM, which Andro
 build/keys.sh, build/sign.sh         release keys (on the build disk only) and release signing
 build/soong-prune.py                 generates the device's Soong prune list
 build/debug-sign.sh                  signed DEBUG OTA: the build plus an overlay of extra files
-build/publish.sh                     GitHub release + per-build Updater feed (incremental.sh, feed.py)
+build/publish.sh                     GitHub release + Updater feed (incremental.sh, feed.py)
 debug/sdlog/                         debug overlay: boot logs to /metadata, copied to the SD card by recovery
 patches/<project>/                   our commits on top of the synced trees (build/apply-patches.sh)
 ```

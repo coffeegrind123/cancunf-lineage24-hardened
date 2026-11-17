@@ -100,12 +100,14 @@ What runs today, measured on build `1794688012` (2026-11-14):
 
 ```
 build.sh -> sign.sh -> publish.sh ---> GitHub release cancunf-<build id>   (full OTA + incrementals)
-                         |        \--> branch "ota": <id>.json, ota.json    (the feed)
+                         |        \--> branch "ota": feed.json, <id>.json, ota.json  (the feed)
                   incremental.sh
-phone: Updater -> raw.githubusercontent.com/.../ota/{incr}.json -> zip URL -> update_engine
+phone: Updater -> raw.githubusercontent.com/.../ota/feed.json -> zip URL -> update_engine
 ```
 
-`{incr}` is the installed build's `ro.build.version.incremental`, which in our builds is the build id. Builds up to `1794688012` were made with the fixed URI `.../ota/ota.json`, so that file stays and always holds the full OTA.
+Builds after `1794905814` all read the same `ota/feed.json`: the full OTA plus every incremental, each tagged with its source build. Updater patch 0001 drops incrementals made from another build, and drops the full OTA when an incremental to the same build applies, so each phone sees exactly what it can install. That works for builds that were never published too.
+
+Earlier builds read older URIs, so their files stay: builds after `1794688012` through `1794905814` read `.../ota/{incr}.json`, where `{incr}` is the installed `ro.build.version.incremental` (our build id). Builds up to `1794688012` read the fixed `.../ota/ota.json`, which always holds the full OTA. A build with the `{incr}` URI that `publish.sh` never wrote a file for (a local build made after the last publish) gets HTTP 404, and the Updater shows "The update check failed"; that was the reason for `feed.json`.
 
 **`build/publish.sh [build id]`** (defaults to the newest `/lin/release/<id>/`):
 
@@ -113,11 +115,12 @@ phone: Updater -> raw.githubusercontent.com/.../ota/{incr}.json -> zip URL -> up
 2. Reads the facts from the signed packages themselves (`build/feed.py` checks them): `ro.build.date.utc`, SDK level, security patch, `ro.lineage.releasetype` and version, each zip's size, SHA-256 and `ota-property-files`. It refuses a build that isn't `release-keys`.
 3. Creates release `cancunf-<id>` with the full OTA and the incrementals, then checks GitHub's own SHA-256 of every uploaded asset against ours.
 4. Force-pushes a one-commit `ota` branch with the feed files, and waits until `raw.githubusercontent.com` serves each one identically:
+   - `feed.json`: the full OTA and every incremental, for builds after `1794905814`.
    - `<source id>.json` for every older build: its incremental, or the full OTA when it is older than the newest `INCR_SOURCES`. An incremental entry also carries `files[0].pre_build_incremental` (its source build), which our Updater patch uses for the label and to block it on any other build; stock LineageOS Updaters ignore the field.
    - `<id>.json` for the new build itself: `[]`, which the Updater shows as no update.
    - `ota.json`: the full OTA, for builds with the fixed URI.
 
-   A build without a file gets HTTP 404, which the Updater shows as an error, so every build that may be on a phone needs its target files kept.
+   For the `{incr}` builds, one without a file gets HTTP 404, which the Updater shows as an error, so keep the target files of every such build that may be on a phone.
 5. Deletes every older `cancunf-*` release and its tag. Only the latest release is kept on GitHub, and the old ones go only after the new feed is live, so the feed never points at a deleted file.
 
 `DRY_RUN=1` makes the incrementals, prints the feed files and publishes nothing.
@@ -134,7 +137,7 @@ Incremental install, measured on build `1794738550` over `1794730100` (2026-11-1
 
 - **The feed client doesn't follow redirects** (`followRedirects(false)`), so the feed can't be a release asset or `releases/latest/download/...`, which are both redirects. `raw.githubusercontent.com` answers 200 directly.
 - **The zip download follows one redirect** on the same scheme (`setUseDuplicateLinks(true)`), which is exactly what a GitHub release asset needs (`github.com` → `release-assets.githubusercontent.com`).
-- **Property values are capped at 91 bytes.** `https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/cancunf.json` was 92 and failed the build; `.../ota/{incr}.json` is exactly 91. A longer repository or branch name doesn't fit.
+- **Property values are capped at 91 bytes.** `https://raw.githubusercontent.com/coffeegrind123/cancunf-lineage24-hardened/ota/cancunf.json` was 92 and failed the build; `.../ota/{incr}.json` is exactly 91 and `.../ota/feed.json` is 89. A longer repository or branch name doesn't fit.
 - **`{device}`, `{type}` and `{incr}` are replaced in the URI** (`UpdatesNetworkDataSource.kt`). A non-2xx answer is an error, not "no updates".
 - An entry is offered only if its `type` matches `ro.lineage.releasetype` (`UNOFFICIAL`), its `datetime` is newer than the installed `ro.build.date.utc`, and its `os_sdk_level` is not lower. A published build can't be reinstalled by mistake.
 - **Streaming:** each entry carries `ota_property_files` (the package's `ota-property-files` metadata). With it, and "stream updates" on (the default), the Updater reads `payload_properties.txt` with a range request and has `update_engine` fetch `payload.bin` straight from the release URL, so the zip is never stored on `/data`. Both follow GitHub's redirect: `SingleRangeHttpFetcher` uses OkHttp's default, and `update_engine` sets `CURLOPT_FOLLOWLOCATION` with up to 10 redirects. A range request through the redirect returns 206 (checked with curl, 2026-11-15). Turning streaming off in the Updater's preferences falls back to download, verify, install.
