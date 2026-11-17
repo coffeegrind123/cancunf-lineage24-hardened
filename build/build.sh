@@ -63,6 +63,14 @@ docker run --rm --name lineage-build \
         ccache -M 50G >/dev/null
         cd /lin/src
         export WITH_DEXPREOPT=false
+        # A real build number per build. Left unset, it is "eng.<user>": the
+        # incremental still changes (it falls back to the date), but the build
+        # fingerprint stays identical across builds, so PackageManagerService
+        # (mIsUpgrade, from the partitions fingerprint) never treats an OTA as
+        # an OS upgrade and skips its upgrade work. Same epoch value as the
+        # incremental, so build ids keep their format.
+        export BUILD_DATETIME=${BUILD_DATETIME:-$(date -u +%s)}
+        export BUILD_NUMBER=${BUILD_NUMBER:-$BUILD_DATETIME}
         export DISABLE_HOST_CROSS_WINDOWS=${DISABLE_HOST_CROSS_WINDOWS:-true}  # build/make patch 0001
         source build/envsetup.sh
         breakfast cancunf "$VARIANT"
