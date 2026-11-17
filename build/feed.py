@@ -7,7 +7,13 @@
 stdin holds one JSON object per line: the build ({"kind": "build"}) and then
 every OTA package in its release directory ({"kind": "ota"}). Writes
 <out dir>/<id>.json for every older build and for the build itself, plus the
-legacy feed, and prints the package paths to upload, one per line.
+legacy feed and feed.json, and prints the package paths to upload, one per line.
+
+feed.json is the feed for every build after 1794905814 (device patch 0018):
+the full OTA plus every incremental, each with its source build. The Updater
+(its patch 0001) keeps only the entries for the running build, so builds that
+were never published can check for updates too. The per-build <id>.json files
+remain for builds whose feed URI is ota/{incr}.json.
 
 The feed format is the LineageOS Updater's (NetworkUpdate.kt): a list of
 updates, each with one file; the Updater reads only files[0].
@@ -19,6 +25,7 @@ import sys
 # Payload ranges the Updater needs to stream an A/B update (Constants.java).
 STREAM_ENTRIES = ("payload_metadata.bin", "payload.bin", "payload_properties.txt")
 RELEASE_KEYS = "release-keys"
+FEED = "feed.json"
 
 
 def fail(msg):
@@ -102,6 +109,7 @@ def main():
         return f"https://github.com/{repo}/releases/download/{tag}/{ota['name']}"
 
     feeds = {legacy: entry(build, full, url(full)), f"{bid}.json": []}
+    feeds[FEED] = [u for ota in (full, *incrementals.values()) for u in entry(build, ota, url(ota))]
     for s in older:
         ota = incrementals.get(s, full)
         feeds[f"{s}.json"] = entry(build, ota, url(ota))

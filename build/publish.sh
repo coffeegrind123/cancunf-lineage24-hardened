@@ -13,15 +13,18 @@
 #   3. delete every older release and its tag.
 # The order matters: the feed never points at a deleted file.
 #
-# Feed layout (branch "ota"), one file per installed build:
-#   <id>.json   read by builds with the {incr} feed URI (device patch 0018);
+# Feed layout (branch "ota"):
+#   feed.json   read by every build after 1794905814 (device patch 0018): the
+#               full OTA plus every incremental; the Updater (patch 0001) keeps
+#               the entries for the running build.
+#   <id>.json   read by builds after 1794688012 through 1794905814 ({incr} URI);
 #               the Updater puts ro.build.version.incremental, which is our
 #               build id, into the URL. Recent builds get an incremental,
 #               older ones the full OTA, and the new build itself gets [].
 #   ota.json    the full OTA, for builds up to 1794688012 whose feed URI was
 #               fixed at ota/ota.json.
-# Every build in /lin/release with signed target files gets a file: a build
-# without one gets HTTP 404, which the Updater shows as an error.
+# Every build in /lin/release with signed target files gets a file: an {incr}
+# build without one gets HTTP 404, which the Updater shows as an error.
 #
 # The feed lives on raw.githubusercontent.com because the Updater fetches it
 # without following redirects; releases/latest/download/... is a redirect.

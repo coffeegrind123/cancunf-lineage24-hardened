@@ -1,4 +1,4 @@
-From b732278f2e1a901b074c1052ab8ba70a2e320839 Mon Sep 17 00:00:00 2001
+From f5d047135abd53800aa3cc1a241f9bd22922d5d8 Mon Sep 17 00:00:00 2001
 From: lineage-build <build@localhost>
 Date: Sun, 15 Nov 2026 12:08:45 +0000
 Subject: [PATCH] Updater: Label incremental updates as incremental
@@ -13,12 +13,19 @@ from its metadata precondition. Label such entries as incremental,
 and block one whose source is not the installed build instead of
 letting update_engine fail at the source hash check.
 
+Drop feed entries that are incrementals for another build, and the
+full OTA of a build that an applicable incremental reaches, so one
+feed listing every incremental serves every build. A feed keyed on
+the running build can't: builds that were never published had no
+feed file, and their update check failed with HTTP 404.
+
 Change-Id: I209c8636a6e5dc3272806f73f56b4bdf7077ad72
 ---
  README.md                                     |   1 +
  .../org/lineageos/updater/UpdateImporter.java |   1 +
  .../updater/controller/UpdaterController.java |   1 +
  .../java/org/lineageos/updater/data/Update.kt |  14 +-
+ .../updater/data/UpdatesRepository.kt         |  17 +++
  .../updater/data/source/local/UpdateEntity.kt |  11 +-
  .../data/source/local/UpdatesDatabase.kt      |  10 +-
  .../data/source/network/NetworkUpdate.kt      |   2 +
@@ -28,18 +35,18 @@ Change-Id: I209c8636a6e5dc3272806f73f56b4bdf7077ad72
  .../updater/util/OtaMetadataParser.kt         |   3 +
  app/src/main/res/values/strings.xml           |   3 +
  .../5.json                                    | 121 ++++++++++++++++++
- 13 files changed, 181 insertions(+), 10 deletions(-)
+ 14 files changed, 198 insertions(+), 10 deletions(-)
  create mode 100644 schemas/org.lineageos.updater.data.source.local.UpdatesDatabase/5.json
 
 diff --git a/README.md b/README.md
-index fe55146..fd9d0be 100644
+index fe55146..5a1c3b4 100644
 --- a/README.md
 +++ b/README.md
 @@ -40,6 +40,7 @@ The `files[0].filename` attribute is the name of the file to be downloaded.
  The `files[0].os_patch_level` optional attribute is the security patch level of the OTA update.  
  The `files[0].os_sdk_level` optional attribute is the SDK level of the OTA update.  
  The `files[0].ota_property_files` optional attribute is the `ota-property-files` value from `META-INF/com/android/metadata` of the OTA update.  
-+The `files[0].pre_build_incremental` optional attribute marks an incremental OTA: the `pre-build-incremental` value from its metadata, i.e. the `ro.build.version.incremental` it applies over. Omit it for a full OTA.  
++The `files[0].pre_build_incremental` optional attribute marks an incremental OTA: the `pre-build-incremental` value from its metadata, i.e. the `ro.build.version.incremental` it applies over. Omit it for a full OTA. The Updater hides incrementals for any other build, and hides a full OTA when an incremental to the same build applies, so one feed can serve every build.  
  The `files[0].sha256` attribute is a sha256 of the OTA update.  
  The `files[0].size` attribute is the size of the update expressed in bytes.  
  The `files[0].url` attribute is the URL of the file to be downloaded.  
@@ -133,6 +140,42 @@ index 194dc02..c762de7 100644
 +
      fun hasVerifiedPackage(): Boolean =
          status.hasVerifiedPackage() && file?.exists() == true
+ 
+diff --git a/app/src/main/java/org/lineageos/updater/data/UpdatesRepository.kt b/app/src/main/java/org/lineageos/updater/data/UpdatesRepository.kt
+index c9e2350..9a59f32 100644
+--- a/app/src/main/java/org/lineageos/updater/data/UpdatesRepository.kt
++++ b/app/src/main/java/org/lineageos/updater/data/UpdatesRepository.kt
+@@ -55,6 +55,7 @@ class UpdatesRepository(
+ 
+         val networkUpdates = withContext(Dispatchers.IO) {
+             networkDataSource.fetchUpdates().map { it.toUpdate() }.filter { filterUpdates(it) }
++                .let { preferIncremental(it) }
+         }
+ 
+         if (networkUpdates.isEmpty()) return System.currentTimeMillis()
+@@ -91,7 +92,23 @@ class UpdatesRepository(
+         return System.currentTimeMillis()
+     }
+ 
++    // One feed serves every build: it lists the full OTA plus incrementals from
++    // several older builds. Where an incremental applies to the running build,
++    // offer it instead of the full OTA of the same build.
++    private fun preferIncremental(updates: List<Update>): List<Update> {
++        val incrementalBuilds = updates.filter { it.isIncremental }.map { it.timestamp }.toSet()
++        return updates.filter { it.isIncremental || it.timestamp !in incrementalBuilds }
++    }
++
+     private fun filterUpdates(update: Update): Boolean {
++        // An incremental only applies over the build it was made from.
++        if (update.isIncremental &&
++            update.preBuildIncremental != DeviceInfoUtils.buildVersionIncremental
++        ) {
++            Log.d(TAG, "${update.name} is an incremental for build ${update.preBuildIncremental}")
++            return false
++        }
++
+         val isCurrentBuild = update.timestamp == DeviceInfoUtils.buildDateTimestamp
+         val isOlderBuild = update.timestamp < DeviceInfoUtils.buildDateTimestamp
  
 diff --git a/app/src/main/java/org/lineageos/updater/data/source/local/UpdateEntity.kt b/app/src/main/java/org/lineageos/updater/data/source/local/UpdateEntity.kt
 index 357694f..4efe535 100644
@@ -457,6 +500,3 @@ index 0000000..e53e5a1
 +  }
 +}
 \ No newline at end of file
--- 
-2.43.0
-
