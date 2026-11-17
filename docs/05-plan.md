@@ -97,7 +97,7 @@ Because both projects share the same AOSP base, most of these should cherry-pick
    - sandboxed Play, Aurora Store, F-Droid and Titanium Browser installed by AppSetup ([10-appsetup.md](10-appsetup.md)).
    - verified on the phone (2026-11-16, no Google account): GmsCore's device check-in and FCM registration (FCM Toolbox gets a token, "Online"); GmsCore's main process isn't frozen by the cached-app freezer while cached apps are; Play-services location requests are rerouted to the OS location service.
    - still to verify: FCM delivery of a real message, Play Store sign-in and an install, and the Play Integrity verdict (expected to fail until phase 4).
-   - **location: port GrapheneOS's network location next** (details in "Location" below). Rerouting works, but indoors nothing answers: LineageOS ships no network location provider, and the GPS had no fix.
+   - location: **done 2026-11-17**. GrapheneOS's network location provider, its settings and the Wi-Fi scan fixes are ported ([06-gmscompat-port.md](06-gmscompat-port.md#location-follow-up-2026-11-16)). Indoors, a network fix arrives about 30 s after boot at ~10 m accuracy (details in "Location" below).
 3. **Hardening**, one feature per build, each verified on the phone.
 4. **Integrity support** in the framework.
 5. **Calls and SMS end to end** once a SIM is available.
@@ -153,15 +153,11 @@ PixelOS's Pixel features are a separate layer of Google binaries extracted from 
 
 ## Location
 
-GrapheneOS's sandboxed Play gets locations in three layers. The first is ported; the other two are next.
+GrapheneOS's sandboxed Play gets locations in three layers. All three are ported ([06-gmscompat-port.md](06-gmscompat-port.md#location-follow-up-2026-11-16) has the commit list and what had to change).
 
 1. **GmsCompat reroutes Play-services location calls to the OS location service**, so Google's location service never sees them. Ported with phase 2 and working: a Maps request reaches the OS `gps` provider.
-2. **Network location from GrapheneOS's own provider**, the NetworkLocation app ([platform_packages_apps_NetworkLocation](https://github.com/GrapheneOS/platform_packages_apps_NetworkLocation)). It does Wi-Fi positioning against Apple's Wi-Fi location database, queried through GrapheneOS's proxy (TLS 1.3 only). It's opt-in in Settings › Location and doesn't use cell towers. Without it a position needs a GPS fix, which indoors usually means none. To port:
-   - the app (Rust with a JNI entry point, built by Soong) as a new manifest project;
-   - frameworks/base: `df6a80b3bc` (add it to `config_locationProviderPackageNames`), `18c04e99d5` (network location setting), `3539c74dc5` (never remove location providers at runtime), and the fused-provider fixes `8cfd21e7e3`, `cc4fb8697c`, `ae077bd735`;
-   - Settings: the network location toggle;
-   - build: `d29beff2fd`, `7fedec9c19` (add NetworkLocation to the product).
-3. **GNSS assistance through GrapheneOS's servers**: SUPL (`1259408b52`) and PSDS (`f47b691b97`) settings, plus `bd75ca83e6` (don't send the IMSI or phone number to the SUPL server), and their Settings pages (`d186cdd504`, `a2144665cd`). **Check on this phone first:** GrapheneOS wrote these for Pixel GNSS stacks; MediaTek's `mnld` reads SUPL from its own vendor configuration (`agps_profiles_conf2.xml`), so the settings may need a vendor-side counterpart to take effect.
+2. **Network location from GrapheneOS's own provider**, the NetworkLocation app ([platform_packages_apps_NetworkLocation](https://github.com/GrapheneOS/platform_packages_apps_NetworkLocation)). It does Wi-Fi positioning against Apple's Wi-Fi location database, queried through GrapheneOS's proxy (TLS 1.3 only). It's opt-in in Settings › Location › Location services. Without it a position needs a GPS fix, which indoors usually means none. **Ported and verified (2026-11-17):** NetworkLocation holds its default permissions, and indoors a fix arrives about 30 s after boot at ~10 m accuracy (cell towers alone gave ~1.4 km). Two fixes beyond GrapheneOS's list were needed: the GrapheneOS Wi-Fi commits `eedb2526ab` and `64320f62bd` (every Wi-Fi scan was refused without them), and `patches/vendor_lineage/0001`, because LineageOS's overlay replaced the framework's `config_locationProviderPackageNames`.
+3. **GNSS assistance through GrapheneOS's servers**: SUPL (`1259408b52`) and PSDS (`f47b691b97`) settings, plus `bd75ca83e6` (don't send the IMSI or phone number to the SUPL server), and their Settings pages (`d186cdd504`, `a2144665cd`). **Ported**, except `bd75ca83e6` (LineageOS has its own version) and with PSDS adapted to LineageOS's Assisted GPS switch. **Still to check on this phone:** GrapheneOS wrote these for Pixel GNSS stacks; MediaTek's `mnld` reads SUPL from its own vendor configuration (`agps_profiles_conf2.xml`), so the settings may need a vendor-side counterpart to take effect.
 
 Each piece goes through the same dependency closure and reference checks as the GmsCompat port ([06-gmscompat-port.md](06-gmscompat-port.md)). It's checked on the phone indoors (Wi-Fi fix within seconds) and outdoors (GPS fix, time to first fix).
 

@@ -10,7 +10,7 @@ A LineageOS 24 (Android 17) build for the **moto g54 5G** (XT2343-2, `cancunf`, 
 | Build host on Windows/WSL2 with a hard memory cap | done; Android 17 analysis runs with zram, see [docs/04-build-host.md](docs/04-build-host.md) |
 | Plain LineageOS 24 for cancunf | done: release-signed builds run on the phone; hardware checked without a SIM (sensors, cameras, Wi-Fi, BT, NFC, GNSS, audio, modem). The first build bootlooped on a missing thermal-HAL library, fixed by device patch 0015; see [docs/09-first-install.md](docs/09-first-install.md). Port fixes in [docs/04-build-host.md](docs/04-build-host.md#our-changes-to-synced-trees) |
 | Release keys and signing | done: [`build/keys.sh`](build/keys.sh), [`build/sign.sh`](build/sign.sh); keys stay on the build disk |
-| GrapheneOS GmsCompat (sandboxed Google Play) | ported and running: GmsCore runs sandboxed, FCM registers, location requests are rerouted to the OS. Next: GrapheneOS's network location provider (indoor location), then FCM delivery and Play sign-in checks. [docs/06-gmscompat-port.md](docs/06-gmscompat-port.md), [docs/05-plan.md](docs/05-plan.md#location) |
+| GrapheneOS GmsCompat (sandboxed Google Play) | ported and running: GmsCore runs sandboxed, FCM registers, location requests are rerouted to the OS, and GrapheneOS's network location provider gives indoor fixes. Next: FCM delivery and Play sign-in checks. [docs/06-gmscompat-port.md](docs/06-gmscompat-port.md), [docs/05-plan.md](docs/05-plan.md#location) |
 | GrapheneOS hardening, as far as hardware allows | planned (phase 3) |
 | Root-free Play Integrity support | planned (phase 4) |
 | VoLTE calls / SMS | phase 5. No SIM yet, so only the no-SIM half can be verified |

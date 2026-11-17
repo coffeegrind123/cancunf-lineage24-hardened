@@ -115,7 +115,8 @@ Later patches fix what the first installs found on the phone, or add features:
 | device 0018 | `lineage.updater.uri` points the Updater at our per-build feed ([07-maintenance.md](07-maintenance.md#ota-delivery-from-github)) |
 | Updater 0001 | label incremental entries as incremental and block one made from another build; the stock Updater called every entry "Full install" |
 | device 0020, 0022 | AppSetup: first-run installer and updater for sandboxed Google Play, Aurora Store, F-Droid, Termux, Termux:API and Titanium Browser, each pinned to its signing certificate ([10-appsetup.md](10-appsetup.md)) |
-| GmsCompat port | phase 2: about 100 GrapheneOS commits in 22 projects plus the GmsCompat, LogViewer and config apps ([06-gmscompat-port.md](06-gmscompat-port.md)) |
+| vendor/lineage 0001 | LineageOS's `config_locationProviderPackageNames` overlay replaced the framework list, so NetworkLocation got no default permission grants; the overlay now matches GrapheneOS's list (fused + NetworkLocation, no `com.google.android.gms`) ([06-gmscompat-port.md](06-gmscompat-port.md#location-follow-up-2026-11-16)) |
+| GmsCompat port | phase 2: about 100 GrapheneOS commits in 22 projects plus the GmsCompat, LogViewer and config apps, then GrapheneOS's location stack (NetworkLocation, SUPL/PSDS/geocoder settings, Wi-Fi scan access) ([06-gmscompat-port.md](06-gmscompat-port.md)) |
 
 Binary edits to vendor blobs (renames, `patchelf`) are not stored as patches, because this repo carries no proprietary files. `apply-patches.sh` performs them after the vendor patches, matching what `extract-files.py` would now produce. `BRANCH=<name>` lets a scratch worktree verify the series without moving the live branch: the whole series reproduces the built trees byte for byte.
 
