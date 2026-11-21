@@ -1,0 +1,99 @@
+name: Ovis APK
+# Builds the Ovis Android app (devswha/ovis, app/android) from a pinned commit, unsigned.
+# It is signed offline with our own key and published as an ovis-v* release by
+# build/ovis-publish.sh; AppSetup installs it from there (docs/10-appsetup.md).
+# No secrets are used: upstream's code runs here with a read-only token.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: devswha/ovis commit to build (full SHA)
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ovis-${{ inputs.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check the ref is a full commit SHA
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ref must be a full 40-character commit SHA: '$REF'" >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: devswha/ovis
+          ref: ${{ inputs.ref }}
+          path: ovis
+          persist-credentials: false
+      - name: Confirm the checkout
+        env:
+          REF: ${{ inputs.ref }}
+        run: test "$(git -C ovis rev-parse HEAD)" = "$REF"
+      # upstream's gradle-wrapper.jar runs here; refuse one Gradle never published
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          min-wrapper-count: 1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      # app/scripts/build-web.ts builds the demo from the root checkout's client
+      - name: Install the client's packages
+        working-directory: ovis
+        run: bun install --frozen-lockfile
+      - name: Install the app's packages
+        working-directory: ovis/app
+        run: bun install --frozen-lockfile
+      - name: Build the app's pages
+        working-directory: ovis/app
+        run: bun run build:web
+      - name: Sync Capacitor into the Android project
+        working-directory: ovis/app
+        run: bunx --bun cap sync android
+      # no OVIS_UPLOAD_PROPERTIES and no google-services.json: an unsigned release build
+      # with FCM push unavailable (ovis-push/README.md)
+      - name: Build the unsigned release APK
+        working-directory: ovis/app/android
+        env:
+          OVIS_UPLOAD_PROPERTIES: ''
+          OVIS_GOOGLE_SERVICES: ''
+        run: ./gradlew --no-daemon --stacktrace :app:assembleRelease
+      - name: Describe the build
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          apk=ovis/app/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$apk" || { echo "::error::no $apk" >&2; ls -R ovis/app/android/app/build/outputs >&2 || true; exit 1; }
+          mkdir -p out
+          cp "$apk" out/ovis-unsigned.apk
+          aapt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2
+          badging=$("$aapt" dump badging out/ovis-unsigned.apk | head -1)
+          echo "$badging"
+          jq -n --arg source "$REF" \
+                --arg sha256 "$(sha256sum out/ovis-unsigned.apk | cut -d' ' -f1)" \
+                --arg package "$(sed -n "s/.* name='\([^']*\)'.*/\1/p" <<<"$badging")" \
+                --arg versionCode "$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" <<<"$badging")" \
+                --arg versionName "$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging")" \
+                --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+                '{source:$source, package:$package, versionCode:($versionCode|tonumber), versionName:$versionName, unsigned_sha256:$sha256, run:$run}' \
+                > out/ovis-build.json
+          cat out/ovis-build.json
+          cat out/ovis-build.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ovis-unsigned
+          path: out/
+          if-no-files-found: error
