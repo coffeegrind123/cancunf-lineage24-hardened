@@ -109,6 +109,8 @@ Builds after `1794905814` all read the same `ota/feed.json`: the full OTA plus e
 
 Earlier builds read older URIs, so their files stay: builds after `1794688012` through `1794905814` read `.../ota/{incr}.json`, where `{incr}` is the installed `ro.build.version.incremental` (our build id). Builds up to `1794688012` read the fixed `.../ota/ota.json`, which always holds the full OTA. A build with the `{incr}` URI that `publish.sh` never wrote a file for (a local build made after the last publish) gets HTTP 404, and the Updater shows "The update check failed"; that was the reason for `feed.json`.
 
+Verified on build `1794922880` after its publish (2026-11-21): the update check read `feed.json`, logged the full OTA as not newer than the current build and each of the three incrementals as being for another build, and showed "Last checked" with no error. Before the publish, the same check got HTTP 404, since `feed.json` didn't exist yet.
+
 **`build/publish.sh [build id]`** (defaults to the newest `/lin/release/<id>/`):
 
 1. Finds every older build with signed target files in `/lin/release`. The newest `INCR_SOURCES` (default 3) get an incremental from `build/incremental.sh`, named `lineage-<version>-incr-<source id>-signed.zip`. It keeps an existing one after checking its metadata, and refuses a package whose metadata isn't A/B from that source to this target.
