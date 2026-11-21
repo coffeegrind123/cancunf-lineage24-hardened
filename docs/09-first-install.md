@@ -132,6 +132,28 @@ Hands-on (same day): camera, audio, Wi-Fi and Bluetooth work; fingerprint not tr
   - That loaded it (log line and tombstone map), but the crash still happened. The ArcSoft library is `dlopen`ed, and bionic resolves a dlopened library's symbols from the global group (the executable, `LD_PRELOAD` and `DF_1_GLOBAL` libraries) and then its own dependencies. A `DT_NEEDED` of the executable is in neither, so the blob still used libc's `malloc`. 0021 links `libcamhal_pad` with `-z global`, so it joins the global group.
   - **Check that it's active:** `logcat -d | grep camhal_pad` shows `padding allocations >= 65536 bytes by 4096` once per HAL start. A shell can't read the HAL's memory map, so this log line is the evidence.
 
+## Recheck on build `1794922880` (2026-11-21)
+
+Same read-only checks, about 90 minutes after boot, plus the camera crash path:
+
+| Area | Result |
+|---|---|
+| Boot health | `sys.boot_completed=1`; crash buffer empty; no tombstones or ANRs in dropbox |
+| Thermal HAL | `HAL Ready: true` |
+| Sensors | 53 entries in `dumpsys sensorservice` (hardware plus virtual) |
+| Cameras | 3 devices |
+| Wi-Fi, NFC | Wi-Fi enabled; NFC on |
+| Bluetooth | `BLE_ON` (switched off from quick settings; scanning-only mode) |
+| GNSS | `mnld` running |
+| Audio | 5 output threads |
+| Modem | baseband `MT6855D_TC2...` loaded, `ccci_mdinit` running |
+| Secure element | no restarts (device patch 0016 holds) |
+| Battery | on battery (status 3, discharging), health good |
+
+**Camera crash fixed (device patch 0021), verified:** in low light, the Moto camera on the front lens with Night Vision on took 5 photos through the ArcSoft path (`RawSuperNightProvider`, `TP_FEATURE_RAW_SUPERNIGHT`). There was no fatal signal and no tombstone, `camerahalserver` kept its PID, and every photo was saved. That's the same path that crashed on 2026-11-14 and 2026-11-16.
+
+`logcat | grep` counts here exclude adbd's echo of the command itself, which otherwise shows up as one false hit.
+
 ## Updating an installed phone
 
 Measured with build `1794672767` over `1794655118` (2026-11-14), no wipe:

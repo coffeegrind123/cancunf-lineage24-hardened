@@ -96,7 +96,8 @@ Because both projects share the same AOSP base, most of these should cherry-pick
    - port: **done 2026-11-16**, about 100 GrapheneOS commits in 22 projects ([06-gmscompat-port.md](06-gmscompat-port.md)). It runs on the phone: GmsCore starts through the compatibility layer with its config, and the Play Store opens to its sign-in screen.
    - sandboxed Play, Aurora Store, F-Droid and Titanium Browser installed by AppSetup ([10-appsetup.md](10-appsetup.md)).
    - verified on the phone (2026-11-16, no Google account): GmsCore's device check-in and FCM registration (FCM Toolbox gets a token, "Online"); GmsCore's main process isn't frozen by the cached-app freezer while cached apps are; Play-services location requests are rerouted to the OS location service.
-   - still to verify: FCM delivery of a real message, Play Store sign-in and an install, and the Play Integrity verdict (expected to fail until phase 4).
+   - verified 2026-11-21 on build `1794922880`: GmsCore's main process stays unfrozen (a foreground service, adj 250) while cached apps, the Play Store and Maps among them, are frozen; GmsCore holds an established connection to FCM's port 5228; FCM Toolbox shows a token and "Online"; `GmsCompat` logs nothing and the crash buffer is empty.
+   - still to verify: FCM delivery of a real message (needs a sender with Firebase credentials), Play Store sign-in and an install, and the Play Integrity verdict (expected to fail until phase 4).
    - location: **done 2026-11-17**. GrapheneOS's network location provider, its settings and the Wi-Fi scan fixes are ported ([06-gmscompat-port.md](06-gmscompat-port.md#location-follow-up-2026-11-16)). Indoors, a network fix arrives about 30 s after boot at ~10 m accuracy (details in "Location" below).
 3. **Hardening**, one feature per build, each verified on the phone.
 4. **Integrity support** in the framework.
