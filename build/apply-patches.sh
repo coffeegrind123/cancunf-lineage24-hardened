@@ -44,6 +44,8 @@ declare -A PATHS=(
     [tools_metalava]=tools/metalava
     # Location port (docs/06-gmscompat-port.md, Location)
     [vendor_lineage]=vendor/lineage
+    # Backuptool misfiring on erofs (docs/04)
+    [system_update_engine]=system/update_engine
 )
 
 # Binary edits to vendor blobs. They can't ship as patches because this repo

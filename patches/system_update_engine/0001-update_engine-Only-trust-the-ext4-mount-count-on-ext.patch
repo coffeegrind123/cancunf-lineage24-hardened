@@ -1,0 +1,79 @@
+From 6f6090f9f3b19a9000f6e1e147c04f5e29a9ed76 Mon Sep 17 00:00:00 2001
+From: lineage-build <build@localhost>
+Date: Sat, 21 Nov 2026 12:39:43 +0000
+Subject: [PATCH] update_engine: Only trust the ext4 mount count on ext4
+
+Backuptool runs when the source system partition has been mounted R/W,
+read from the ext4 superblock's mount count. On erofs, which is
+read-only and the default for system on current devices, those bytes
+are part of the UUID and never zero. update_engine then tried to mount
+the target R/W, which erofs refuses, ignored the failure and ran
+backuptool_postinstall.sh from an empty /postinstall: "Backuptool
+postinstall step failed. ret=32512" (exit 127) on every update.
+
+Read the mount count only when the superblock magic is ext4's, and skip
+the scripts when the R/W mount fails.
+
+Change-Id: I4950630427b2ae7ace99c658beaee0c81497886e
+---
+ payload_consumer/postinstall_runner_action.cc | 30 ++++++++++++++++---
+ 1 file changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/payload_consumer/postinstall_runner_action.cc b/payload_consumer/postinstall_runner_action.cc
+index 23f16e1..74eaaf3 100644
+--- a/payload_consumer/postinstall_runner_action.cc
++++ b/payload_consumer/postinstall_runner_action.cc
+@@ -25,6 +25,7 @@
+ #include <unistd.h>
+ 
+ #include <cmath>
++#include <cstring>
+ #include <fstream>
+ #include <string>
+ 
+@@ -210,10 +211,24 @@ bool PostinstallRunnerAction::MountPartition(
+   uint16_t mount_count = 0;
+ 
+   if (!source_path.empty()) {
++    // Only ext4 keeps a mount count. Read it together with the magic at
++    // 0x38: on other filesystems the same bytes hold unrelated data (on
++    // erofs, part of the UUID, so never zero), and a read-only filesystem
++    // can't have been mounted R/W anyway.
++    constexpr off_t kSuperBlock = 0x400;
++    constexpr uint16_t kExt4Magic = 0xEF53;
+     brillo::Blob chunk;
+ 
+-    utils::ReadFileChunk(source_path, 0x400 + 0x34, sizeof(uint16_t), &chunk);
+-    mount_count = *reinterpret_cast<uint16_t*>(chunk.data());
++    if (utils::ReadFileChunk(source_path, kSuperBlock + 0x34, 6, &chunk) && chunk.size() == 6) {
++      uint16_t magic;
++      memcpy(&magic, chunk.data() + 4, sizeof(magic));
++      if (magic == kExt4Magic) {
++        memcpy(&mount_count, chunk.data(), sizeof(mount_count));
++      } else {
++        LOG(INFO) << source_path << " is not ext4 (magic 0x" << std::hex << magic << std::dec
++                  << "); skipping the R/W mount check.";
++      }
++    }
+   }
+ 
+   LOG(INFO) << source_path << " has been mounted R/W " << mount_count << " times.";
+@@ -225,9 +240,16 @@ bool PostinstallRunnerAction::MountPartition(
+     }
+     // Mount the target partition R/W
+     LOG(INFO) << "Running backuptool scripts";
+-    utils::MountFilesystem(mountable_device, fs_mount_dir_, MS_NOATIME | MS_NODEV | MS_NODIRATIME,
+-                           partition.filesystem_type, "seclabel");
++    if (!utils::MountFilesystem(mountable_device, fs_mount_dir_,
++                                MS_NOATIME | MS_NODEV | MS_NODIRATIME, partition.filesystem_type,
++                                "seclabel")) {
++      // Without the target mounted there is no script to run.
++      LOG(ERROR) << "Failed to mount " << mountable_device << " R/W; skipping backuptool scripts";
++      mount_count = 0;
++    }
++  }
+ 
++  if (mount_count > 0) {
+     // Switch to a permissive domain
+     if (setexeccon("u:r:backuptool:s0")) {
+       LOG(ERROR) << "Failed to set backuptool context";
