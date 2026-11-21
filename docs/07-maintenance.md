@@ -36,6 +36,7 @@ OTA updates only work if every release is signed with the **same keys** as the i
 - the `gmscompat_lib` key
 
 - **Generated 2026-11-12** with [`build/keys.sh`](../build/keys.sh). It writes `development/tools/make_key` certificates (bluetooth, cyngn-app, media, networkstack, nfc, platform, releasekey, sdk_sandbox, shared, testcert, testkey, verity, gmscompat_lib), one RSA-4096 key per APEX in the build, and an RSA-4096 AVB key with its `avb_pkmd.bin`. The certificate subject carries the project name only. Re-running it never overwrites a key; it only adds keys for new APEXes.
+- **Ovis key, generated 2026-11-21:** `ovis.pk8`/`ovis.x509.pem` (RSA-4096, `OU=Apps/CN=Ovis`), also in `build/keys.sh`. It signs only the Ovis APK we build from source ([`build/ovis-publish.sh`](../build/ovis-publish.sh)); AppSetup pins its certificate, SHA-256 `a5016d9cd00b0182fbd54742b7c4081116a520747740aa93b1640f9534106f0f`. Losing it means installed copies of Ovis can't take our updates.
 - **Never commit them.** They live on the build disk (`/lin/keys`, mode 700), with an offline encrypted backup kept by the owner.
 - [`build/sign.sh`](../build/sign.sh) re-signs a finished build without recompiling. It writes three files to `/lin/release/<build id>/`: the signed target files (kept, because incrementals need them), the release OTA and the fastboot images.
   - Verified on the first release:

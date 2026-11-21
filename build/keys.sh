@@ -69,6 +69,20 @@ docker run --rm -e SUBJECT="$SUBJECT" -v "$VOL":/lin "$IMAGE" bash -c '
     fi
     [ -e "$K/avb_pkmd.bin" ] || "$S/external/avb/avbtool.py" extract_public_key --key "$K/avb.pem" --output "$K/avb_pkmd.bin"
 
+    # Ovis, built from source and signed by us (build/ovis-publish.sh): its own
+    # RSA-4096 key, so the app holds no signature permission of the ROM keys.
+    # AppSetup pins its certificate (Catalog.java OVIS_KEY).
+    if [ ! -e "$K/ovis.pk8" ]; then
+        openssl genrsa -out "$K/.ovis.pem" 4096 2>/dev/null
+        openssl req -new -x509 -sha256 -key "$K/.ovis.pem" -out "$K/ovis.x509.pem" -days 10000 \
+            -subj "/O=cancunf-lineage24-hardened/OU=Apps/CN=Ovis"
+        openssl pkcs8 -topk8 -nocrypt -in "$K/.ovis.pem" -outform DER -out "$K/ovis.pk8"
+        shred -u "$K/.ovis.pem"
+        echo "new    ovis"
+    else
+        echo "keep   ovis"
+    fi
+
     chmod -R go-rwx "$K"
     echo "$(ls "$K" | wc -l) files in $K, $(stat -c %a "$K") $(stat -c %U "$K")"
 '
