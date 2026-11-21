@@ -1,0 +1,19 @@
+[
+  {
+    "datetime": 1795267521,
+    "type": "UNOFFICIAL",
+    "version": "24.0",
+    "files": [
+      {
+        "filename": "lineage-24.0-20261121-UNOFFICIAL-cancunf-incr-1795264804-signed.zip",
+        "sha256": "3c800a9749f1c08dcea5c94971bf7e53a752773988257f9e9e954875b747a3ae",
+        "size": 215490,
+        "url": "https://github.com/coffeegrind123/cancunf-lineage24-hardened/releases/download/cancunf-1795267521/lineage-24.0-20261121-UNOFFICIAL-cancunf-incr-1795264804-signed.zip",
+        "os_sdk_level": 37,
+        "os_patch_level": "2026-11-01",
+        "ota_property_files": "payload_metadata.bin:5557:90505,payload.bin:5557:206747,payload_properties.txt:212362:151,apex_info.pb:3050:1702,care_map.pb:4799:711,metadata:69:785,metadata.pb:922:2080",
+        "pre_build_incremental": "1795264804"
+      }
+    ]
+  }
+]
